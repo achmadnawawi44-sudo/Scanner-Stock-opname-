@@ -7,17 +7,43 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
-    body { font-family: Arial; padding: 20px; background: #f8f8f8; }
+    body {
+      font-family:sans-serif
+      padding: 20px;
+      background: url('https://raw.githubusercontent.com/username/repo/main/bg.jpg') no-repeat center center fixed;
+      background-size: cover;
+      color: #fff;
+    }
     label, input, button { margin: 5px 0; display: block; }
-    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-    th { background-color: #eee; }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      color: #000;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background-color: #eee;
+    }
+    h2 {
+      color: #ff0000;
+      text-shadow: 1px 1px 3px black;
+    }
+    h3 {
+      color: #ff0000;
+      text-shadow: 1px 1px 3px black;
+    }
     .lokasi-buttons { display: flex; gap: 10px; margin-bottom: 10px; }
     #reader { width: 100%; max-width: 400px; margin: 10px 0; display: none; }
   </style>
 </head>
 <body>
-  <h2>STOCK OP NAME GOTO LIVING</h2>
+  <h2>Scanner Stock Op Name Goto Living</h2>
 
   <label>Nama Lokasi:</label>
   <input type="text" id="lokasiInput" placeholder="Contoh: Gudang A" />
@@ -66,9 +92,13 @@
 
   <script>
     let dataBarang = {};
-    let dataScan = [];
+    let dataScan = JSON.parse(localStorage.getItem("dataScan")) || [];
     let lokasiTerkunci = false;
     let scanner;
+
+    function saveToStorage() {
+      localStorage.setItem("dataScan", JSON.stringify(dataScan));
+    }
 
     function lockLokasi() {
       const lokasi = document.getElementById("lokasiInput");
@@ -78,6 +108,7 @@
       }
       lokasi.disabled = true;
       lokasiTerkunci = true;
+      localStorage.setItem("lokasi", lokasi.value);
       alert("Lokasi dikunci. Silakan mulai scan.");
     }
 
@@ -85,6 +116,7 @@
       const lokasi = document.getElementById("lokasiInput");
       lokasi.disabled = false;
       lokasiTerkunci = false;
+      localStorage.removeItem("lokasi");
       alert("Lokasi sekarang bisa diedit kembali.");
     }
 
@@ -160,10 +192,12 @@
         dataScan.push({ lokasi, barcode, nama, qty });
       }
 
+      saveToStorage();
+      updateTable();
+
       document.getElementById("barcodeInput").value = "";
       document.getElementById("namaBarangInput").value = "";
       document.getElementById("qtyInput").value = "";
-      updateTable();
     }
 
     function updateTable() {
@@ -184,6 +218,7 @@
           const newQty = prompt("Masukkan Qty baru:", item.qty);
           if (newQty !== null && !isNaN(newQty)) {
             item.qty = parseInt(newQty);
+            saveToStorage();
             updateTable();
           }
         };
@@ -220,14 +255,22 @@
             readerDiv.style.display = "none";
           });
         },
-        (errorMsg) => {
-          // console.log("Scanning...", errorMsg);
-        }
+        (errorMsg) => {}
       ).catch((err) => {
         alert("Gagal membuka kamera: " + err);
       });
     }
+
+    window.onload = () => {
+      updateTable();
+      const lokasi = localStorage.getItem("lokasi");
+      if (lokasi) {
+        const lokasiInput = document.getElementById("lokasiInput");
+        lokasiInput.value = lokasi;
+        lokasiInput.disabled = true;
+        lokasiTerkunci = true;
+      }
+    };
   </script>
 </body>
 </html>
-
