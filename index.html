@@ -264,25 +264,30 @@
     }
 
     function simpanKeSpreadsheet() {
-  if (dataScan.length === 0) {
-    alert("Tidak ada data untuk disimpan.");
-    return;
-  }
+      if (dataScan.length === 0) {
+        alert("Tidak ada data untuk disimpan.");
+        return;
+      }
 
-  fetch("https://script.google.com/macros/s/AKfycbyQIOERPkM9yR0Ejm-umqNa1Kl3FtjU8QmllNGTlCa9r09oyXe59giIr2WaMzsXRbfc/exec", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    lokasi: document.getElementById("lokasi").value,
-    barcode: document.getElementById("barcode").value,
-    namaBarang: document.getElementById("namaBarang").value,
-    qty: document.getElementById("qty").value
-  })
-})
-.then(res => res.text())
-.then(res => console.log("Respon:", res))
-.catch(err => console.error("Error:", err));
+      const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz9A8tGU79w9n7W5C1_I6VttvYU-f0uzrQLoqMvwCSiuGD8GdTRJOe11QmNiXjH52cy/exec"; // Ganti dengan URL web app Google Apps Script
 
+      fetch(https://script.google.com/macros/s/AKfycbz9A8tGU79w9n7W5C1_I6VttvYU-f0uzrQLoqMvwCSiuGD8GdTRJOe11QmNiXjH52cy/exec, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dataScan) // langsung kirim array data
+      })
+      .then(res => res.json())
+      .then(response => {
+        if (response.status === "OK") {
+          alert("✅ Data berhasil dikirim ke Spreadsheet!");
+        } else {
+          alert("❌ Gagal: " + response.message);
+        }
+      })
+      .catch(err => {
+        alert("❌ Error: " + err);
+      });
+    }
 
     window.onload = loadDataFromLocalStorage;
   </script>
