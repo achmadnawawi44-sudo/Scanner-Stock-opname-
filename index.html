@@ -269,9 +269,9 @@
         return;
       }
 
-      const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz9A8tGU79w9n7W5C1_I6VttvYU-f0uzrQLoqMvwCSiuGD8GdTRJOe11QmNiXjH52cy/exec"; // 
+      const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbye3btidTHmXR8ZdLYOflzMjxBA51UYnNaT0P6efiyZDCTY3PEBzfwymCbOCKyZhP4d/exec"; // 
 
-      fetch("https://script.google.com/macros/s/AKfycbz9A8tGU79w9n7W5C1_I6VttvYU-f0uzrQLoqMvwCSiuGD8GdTRJOe11QmNiXjH52cy/exec", {
+      fetch(WEB_APP_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(dataScan)
@@ -293,5 +293,6 @@
   </script>
 </body>
 </html>
+
 
 
