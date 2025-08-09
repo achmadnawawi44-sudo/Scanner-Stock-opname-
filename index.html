@@ -269,17 +269,22 @@
     return;
   }
 
-  fetch("https://script.google.com/macros/s/AKfycbzmjUbDsBA5q_oPOArJlbZAYErO8H4SdrYD8xIVyPxo9pmOk4WEe5_cIiXguvIj7x38/exec", {
+ fetch("https://script.google.com/macros/s/AKfycbyQIOERPkM9yR0Ejm-umqNa1Kl3FtjU8QmllNGTlCa9r09oyXe59giIr2WaMzsXRbfc/exec", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(dataScan)
 })
-.then(res => res.json())
-.then(res => {
-  if (res.status === "ok") {
-    alert("✅ Data berhasil dikirim ke Spreadsheet!");
-  } else {
-    alert("❌ Gagal: " + res.message);
+.then(res => res.text()) // pakai text() biar aman kalau bukan JSON
+.then(txt => {
+  try {
+    const res = JSON.parse(txt);
+    if (res.status === "ok") {
+      alert("✅ Data berhasil dikirim ke Spreadsheet!");
+    } else {
+      alert("❌ Gagal: " + res.message);
+    }
+  } catch(e) {
+    alert("❌ Respon tidak valid: " + txt);
   }
 })
 .catch(err => alert("❌ Error koneksi: " + err));
@@ -289,6 +294,7 @@
   </script>
 </body>
 </html>
+
 
 
 
