@@ -270,24 +270,24 @@
   }
 
   fetch("https://script.google.com/macros/s/AKfycbxSKANrVEZUvKhWhS0Led7LGtI6zV8dIq39nY2pHYv5OQoeIQTm_j-FaclO0Rp6j1TC/exec", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    lokasi: document.getElementById("lokasi").value,
-    barcode: document.getElementById("barcode").value,
-    namaBarang: document.getElementById("namaBarang").value,
-    qty: document.getElementById("qty").value
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dataScan)
   })
-})
-.then(res => res.text())
-.then(res => console.log("Respon:", res))
-.catch(err => console.error("Error:", err));
-
+  .then(() => {
+    alert("✅ Data berhasil dikirim ke Spreadsheet!");
+  })
+  .catch(err => {
+    alert("❌ Gagal mengirim data: " + err);
+  });
+}
 
     window.onload = loadDataFromLocalStorage;
   </script>
 </body>
 </html>
+
 
 
 
