@@ -63,8 +63,10 @@
   </table>
 
   <br>
-  <button onclick="exportData()">Export File</button>
-  <button onclick="hapusSemuaData()" style="margin-left: 10px; background-color: red; color: white;">Hapus Semua Data</button>
+ <button onclick="exportData()">Export File</button>
+<button onclick="simpanKeSpreadsheet()" style="background-color: green; color: white; margin-left: 10px;">Simpan ke Spreadsheet</button>
+<button onclick="hapusSemuaData()" style="margin-left: 10px; background-color: red; color: white;">Hapus Semua Data</button>
+
 
   <script>
     let dataBarang = {};
@@ -261,9 +263,28 @@
       }
     }
 
+    function simpanKeSpreadsheet() {
+  if (dataScan.length === 0) {
+    alert("Tidak ada data untuk disimpan.");
+    return;
+  }
+
+  fetch("https://script.google.com/macros/s/AKfycbxSKANrVEZUvKhWhS0Led7LGtI6zV8dIq39nY2pHYv5OQoeIQTm_j-FaclO0Rp6j1TC/exec", {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dataScan)
+  })
+  .then(() => {
+    alert("✅ Data berhasil dikirim ke Spreadsheet!");
+  })
+  .catch(err => {
+    alert("❌ Gagal mengirim data: " + err);
+  });
+}
+
     window.onload = loadDataFromLocalStorage;
   </script>
 </body>
 </html>
-
 
