@@ -269,9 +269,9 @@
         return;
       }
 
-      const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz9A8tGU79w9n7W5C1_I6VttvYU-f0uzrQLoqMvwCSiuGD8GdTRJOe11QmNiXjH52cy/exec"; // Ganti sesuai milikmu
+      const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz9A8tGU79w9n7W5C1_I6VttvYU-f0uzrQLoqMvwCSiuGD8GdTRJOe11QmNiXjH52cy/exec"; // 
 
-      fetch(WEB_APP_URL, {
+      fetch("https://script.google.com/macros/s/AKfycbz9A8tGU79w9n7W5C1_I6VttvYU-f0uzrQLoqMvwCSiuGD8GdTRJOe11QmNiXjH52cy/exec", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(dataScan)
@@ -293,4 +293,5 @@
   </script>
 </body>
 </html>
+
 
