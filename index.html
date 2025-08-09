@@ -63,7 +63,7 @@
   </table>
 
   <br>
- <button onclick="exportData()">Export File</button>
+  <button onclick="exportData()">Export File</button>
 <button onclick="simpanKeSpreadsheet()" style="background-color: green; color: white; margin-left: 10px;">Simpan ke Spreadsheet</button>
 <button onclick="hapusSemuaData()" style="margin-left: 10px; background-color: red; color: white;">Hapus Semua Data</button>
 
@@ -264,34 +264,32 @@
     }
 
     function simpanKeSpreadsheet() {
-  if (dataScan.length === 0) {
-    alert("Tidak ada data untuk disimpan.");
-    return;
-  }
+      if (dataScan.length === 0) {
+        alert("Tidak ada data untuk disimpan.");
+        return;
+      }
 
-  const WEB_APP_URL = https://script.google.com/macros/s/AKfycbz9A8tGU79w9n7W5C1_I6VttvYU-f0uzrQLoqMvwCSiuGD8GdTRJOe11QmNiXjH52cy/exec"; // Ganti sesuai milikmu
+      const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbz9A8tGU79w9n7W5C1_I6VttvYU-f0uzrQLoqMvwCSiuGD8GdTRJOe11QmNiXjH52cy/exec"; // Ganti sesuai milikmu
 
-  fetch(WEB_APP_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(dataScan)
-  })
-  .then(res => res.json())
-  .then(response => {
-    if (response.status === "success" || response.status === "OK") {
-      alert("✅ Data berhasil dikirim ke Spreadsheet!");
-    } else {
-      alert("❌ Gagal: " + (response.message || "Unknown error"));
+      fetch(WEB_APP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dataScan)
+      })
+      .then(res => res.json())
+      .then(response => {
+        if (response.status === "success" || response.status === "OK") {
+          alert("✅ Data berhasil dikirim ke Spreadsheet!");
+        } else {
+          alert("❌ Gagal: " + (response.message || "Unknown error"));
+        }
+      })
+      .catch(err => {
+        alert("❌ Error: " + err);
+      });
     }
-  })
-  .catch(err => {
-    alert("❌ Error: " + err);
-  });
-}
-
 
     window.onload = loadDataFromLocalStorage;
   </script>
 </body>
 </html>
-
