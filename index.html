@@ -263,39 +263,12 @@
       }
     }
 
-    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwlsRI_QLYFvBLzDgjOj2ODV1nh3e43zWr7A_LG6AVnZASNSJbgMMNyu7DrVt5JdPjT/exec"; 
-
-function simpanKeSpreadsheet() {
-  if (dataScan.length === 0) {
-    alert("Tidak ada data untuk disimpan.");
-    return;
-  }
-
-  fetch(WEB_APP_URL, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(dataScan),
-})
-.then(res => res.json())  // <-- Ini wajib agar response jadi objek JSON
-.then(response => {
-  console.log(response);
-  if (response.status === "success" || response.status === "OK") {
-    alert("✅ Data berhasil dikirim ke Spreadsheet!");
-  } else {
-    alert("❌ Gagal: " + (response.message || "Unknown error"));
-  }
-})
-.catch(err => {
-  alert("❌ Error: " + err.message);
-});
-
-
-
 
     window.onload = loadDataFromLocalStorage;
   </script>
 </body>
 </html>
+
 
 
 
