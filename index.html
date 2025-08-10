@@ -272,28 +272,31 @@ function simpanKeSpreadsheet() {
   }
 
   fetch(WEB_APP_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(dataScan),
-  })
-  .then(res => res.json())
-  .then(response => {
-    if (response.status === "success" || response.status === "OK") {
-      alert("✅ Data berhasil dikirim ke Spreadsheet!");
-    } else {
-      alert("❌ Gagal: " + (response.message || "Unknown error"));
-    }
-  })
-  .catch(err => {
-    alert("❌ Error: " + err.message);
-  });
-}
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(dataScan),
+})
+.then(res => res.json())  // <-- Ini wajib agar response jadi objek JSON
+.then(response => {
+  console.log(response);
+  if (response.status === "success" || response.status === "OK") {
+    alert("✅ Data berhasil dikirim ke Spreadsheet!");
+  } else {
+    alert("❌ Gagal: " + (response.message || "Unknown error"));
+  }
+})
+.catch(err => {
+  alert("❌ Error: " + err.message);
+});
+
+
 
 
     window.onload = loadDataFromLocalStorage;
   </script>
 </body>
 </html>
+
 
 
 
