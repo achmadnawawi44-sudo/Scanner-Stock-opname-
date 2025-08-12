@@ -133,7 +133,7 @@
     const SHEET_NAME = "Sheet1";
     
     // Ganti dengan URL Apps Script deployment Anda
-    const APP_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyfgXJ3FoMEO4SjBcmbN9xpd9s-bh2cd9DmotF1O6D7Ls6ZLpWW6sEaYrWvCInTr-Xl/exec';
+    const APP_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyaYbBVcLY-UupVmBaiHmak-_A20-Q4S6eRPvfki9IZwECQungKt2f5XNH4SuXt2Ejh/exec';
 
     function saveDataToLocalStorage() {
       localStorage.setItem("dataScan", JSON.stringify(dataScan));
@@ -464,7 +464,7 @@
         return;
       }
 
-      if (!APP_SCRIPT_URL || APP_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbyfgXJ3FoMEO4SjBcmbN9xpd9s-bh2cd9DmotF1O6D7Ls6ZLpWW6sEaYrWvCInTr-Xl/exec') {
+      if (!APP_SCRIPT_URL || APP_SCRIPT_URL === 'https://script.google.com/macros/s/AKfycbyaYbBVcLY-UupVmBaiHmak-_A20-Q4S6eRPvfki9IZwECQungKt2f5XNH4SuXt2Ejh/exec') {
         alert("Silakan konfigurasi URL Apps Script terlebih dahulu.");
         return;
       }
@@ -481,7 +481,7 @@
         timestamp: new Date().toISOString()
       }));
 
-      fetch(APP_SCRIPT_URL, { // ✅ Tambahkan fetch()
+      fetch(APP_SCRIPT_URL, { "https://script.google.com/macros/s/AKfycbyaYbBVcLY-UupVmBaiHmak-_A20-Q4S6eRPvfki9IZwECQungKt2f5XNH4SuXt2Ejh/exec"
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -541,6 +541,7 @@
   </script>
 </body>
 </html>
+
 
 
 
