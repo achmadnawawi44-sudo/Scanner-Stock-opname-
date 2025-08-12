@@ -481,18 +481,15 @@
         timestamp: new Date().toISOString()
       }));
 
-      // Kirim data ke Google Apps Script
-      (APP_SCRIPT_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          spreadsheetId: SPREADSHEET_ID,
-          sheetName: Sheet1,
-          data: dataWithTimestamp
-        })
-      })
+      fetch(APP_SCRIPT_URL, { // ✅ Tambahkan fetch()
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    spreadsheetId: SPREADSHEET_ID,
+    sheetName: "Sheet1", // Pakai kutip
+    data: dataWithTimestamp
+  })
+})
       .then(response => response.json())
       .then(data => {
         if (data.success) {
@@ -544,6 +541,7 @@
   </script>
 </body>
 </html>
+
 
 
 
