@@ -22,10 +22,21 @@
     .tab.active { background: #fff; border-bottom: 2px solid #4CAF50; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+    /* Atur lebar kolom */
+th:nth-child(1), td:nth-child(1) { width: 15%; }  /* Barcode */
+th:nth-child(2), td:nth-child(2) { width: 55%; }  /* Nama Barang panjang */
+th:nth-child(3), td:nth-child(3) { width: 10%; }  /* Qty kecil */
+th:nth-child(4), td:nth-child(4) { width: 10%; }  /* Aksi */
+
+/* Atur ukuran input qty */
+td:nth-child(3) input {
+  width: 60px;   /* Kecil */
+  text-align: center;
+}
   </style>
 </head>
 <body>
-  <img src="https://raw.githubusercontent.com/achmadnawawi44-sudo/Scanner-barang-SO/refs/heads/main/goto.png" alt="Logo Perusahaan" style="width:150px; margin-bottom:10px;">
+  <img src="https://raw.githubusercontent.com/achmadnawawi44-sudo/Scanner-barang-SO/main/goto.png" alt="Logo Perusahaan" style="width:150px; margin-bottom:10px;">
   <h2>Scanner Stok Opname Goto Living</h2>
 
   <div class="tab-container">
@@ -51,7 +62,7 @@
     <hr>
 
     <label>Scan Barcode:</label>
-    <input type="text" id="barcodeInput" placeholder="Scan barcode..." />
+    <input type="text" id="barcodeInput" placeholder="Scan barcode..." autofocus />
     <button onclick="startScanner()">📷 Scan Kamera</button>
     <div id="reader"></div>
 
@@ -128,12 +139,12 @@
     let scanner;
     let uploadedItems = [];
 
-    // Ganti dengan ID Spreadsheet Anda dan nama sheet
-    const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID';
+    // Ganti dengan ID Spreadsheet Anda
+    const SPREADSHEET_ID = '1dtHGZesUkrZ5M81145ghA0vRDFWb5c4Xm6MwBGFOuAc';
     const SHEET_NAME = 'Sheet1';
     
-    // Ganti dengan URL Apps Script deployment Anda
-    const APP_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyFmDvPnIsINlbzt24bCUmGT7K9hOxJDaLuJ-1PLvTQteIYJ_y9M35p6z7u2tgA5-a4Rw/exec';
+    // URL Apps Script deployment Anda
+    const APP_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyv0Hjs7qGztnkIhXXB9EbSbhHKJbqejNrxUHZhmVqHKs7l0SNmAF5L5gsHVDLgIKCT/exec';
 
     function saveDataToLocalStorage() {
       localStorage.setItem("dataScan", JSON.stringify(dataScan));
@@ -144,15 +155,11 @@
     }
 
     function openTab(tabId) {
-      // Hide all tab contents
       document.querySelectorAll('.tab-content').forEach(tab => {
         tab.classList.remove('active');
       });
-      
-      // Show the selected tab content
       document.getElementById(tabId).classList.add('active');
       
-      // Update tab styling
       document.querySelectorAll('.tab').forEach(tab => {
         tab.classList.remove('active');
       });
@@ -205,36 +212,38 @@
       }
 
       const reader = new FileReader();
-      reader.onload = function (e) {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(sheet);
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: "array" });
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(sheet);
 
-        let count = 0;
-        json.forEach(item => {
-          const keys = Object.keys(item);
-          const barcodeKey = keys.find(k => k.toLowerCase().includes("barcode"));
-          const namaKey = keys.find(k => k.toLowerCase().includes("nama"));
+          let count = 0;
+          json.forEach(item => {
+            const keys = Object.keys(item);
+            const barcodeKey = keys.find(k => k.toLowerCase().includes("barcode"));
+            const namaKey = keys.find(k => k.toLowerCase().includes("nama"));
 
-          if (barcodeKey && namaKey) {
-            const barcode = item[barcodeKey]?.toString().trim();
-            const nama = item[namaKey]?.toString().trim();
-            if (barcode && nama) {
-              dataBarang[barcode] = nama;
-              count++;
+            if (barcodeKey && namaKey) {
+              const barcode = item[barcodeKey]?.toString().trim();
+              const nama = item[namaKey]?.toString().trim();
+              if (barcode && nama) {
+                dataBarang[barcode] = nama;
+                count++;
+              }
             }
-          }
-        });
+          });
 
-        alert(`✅ Berhasil upload ${count} data barang.`);
+          alert(`✅ Berhasil upload ${count} data barang.`);
+        } catch (error) {
+          alert("❌ Gagal membaca file: " + error.message);
+        }
       };
-
-      reader.onerror = function (error) {
+      reader.onerror = function(error) {
         alert("❌ Gagal membaca file.");
         console.error("FileReader error:", error);
       };
-
       reader.readAsArrayBuffer(file);
     }
 
@@ -253,50 +262,52 @@
       }
 
       const reader = new FileReader();
-      reader.onload = function (e) {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(sheet);
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: "array" });
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(sheet);
 
-        uploadedItems = [];
-        let count = 0;
-        
-        json.forEach(item => {
-          const keys = Object.keys(item);
-          const barcodeKey = keys.find(k => k.toLowerCase().includes("barcode"));
-          const namaKey = keys.find(k => k.toLowerCase().includes("nama"));
-          const qtyKey = keys.find(k => k.toLowerCase().includes("qty") || k.toLowerCase().includes("quantity"));
+          uploadedItems = [];
+          let count = 0;
+          
+          json.forEach(item => {
+            const keys = Object.keys(item);
+            const barcodeKey = keys.find(k => k.toLowerCase().includes("barcode"));
+            const namaKey = keys.find(k => k.toLowerCase().includes("nama"));
+            const qtyKey = keys.find(k => k.toLowerCase().includes("qty") || k.toLowerCase().includes("quantity"));
 
-          if (barcodeKey && namaKey) {
-            const barcode = item[barcodeKey]?.toString().trim();
-            const nama = item[namaKey]?.toString().trim();
-            let qty = 0;
-            
-            if (qtyKey) {
-              qty = parseInt(item[qtyKey]) || 0;
+            if (barcodeKey && namaKey) {
+              const barcode = item[barcodeKey]?.toString().trim();
+              const nama = item[namaKey]?.toString().trim();
+              let qty = 0;
+              
+              if (qtyKey) {
+                qty = parseInt(item[qtyKey]) || 0;
+              }
+
+              if (barcode && nama) {
+                uploadedItems.push({
+                  barcode: barcode,
+                  nama: nama,
+                  qty: qty
+                });
+                count++;
+              }
             }
+          });
 
-            if (barcode && nama) {
-              uploadedItems.push({
-                barcode: barcode,
-                nama: nama,
-                qty: qty
-              });
-              count++;
-            }
-          }
-        });
-
-        updateUploadedItemsTable();
-        alert(`✅ Berhasil upload ${count} data barang.`);
+          updateUploadedItemsTable();
+          alert(`✅ Berhasil upload ${count} data barang.`);
+        } catch (error) {
+          alert("❌ Gagal membaca file: " + error.message);
+        }
       };
-
-      reader.onerror = function (error) {
+      reader.onerror = function(error) {
         alert("❌ Gagal membaca file.");
         console.error("FileReader error:", error);
       };
-
       reader.readAsArrayBuffer(file);
     }
 
@@ -371,7 +382,7 @@
       }
     }
 
-    document.getElementById("barcodeInput").addEventListener("input", function () {
+    document.getElementById("barcodeInput").addEventListener("input", function() {
       const barcode = this.value.trim();
       const nama = dataBarang[barcode];
       document.getElementById("namaBarangInput").value = nama || "Barang tidak ditemukan";
@@ -381,6 +392,194 @@
       if (!lokasiTerkunci) {
         alert("Kunci lokasi terlebih dahulu.");
         return;
+      }
+
+      const lokasi = document.getElementById("lokasiInput").value;
+      const barcode = document.getElementById("barcodeInput").value.trim();
+      const nama = document.getElementById("namaBarangInput").value;
+      const qty = parseInt(document.getElementById("qtyInput").value);
+
+      if (!barcode || isNaN(qty)) {
+        alert("Isi barcode dan qty.");
+        return;
+      }
+
+      const index = dataScan.findIndex(item => item.barcode === barcode && item.lokasi === lokasi);
+      if (index > -1) {
+        dataScan[index].qty += qty;
+      } else {
+        dataScan.push({ 
+          lokasi, 
+          barcode, 
+          nama: nama || "Barang tidak dikenal", 
+          qty 
+        });
+      }
+
+      saveDataToLocalStorage();
+      document.getElementById("barcodeInput").value = "";
+      document.getElementById("namaBarangInput").value = "";
+      document.getElementById("qtyInput").value = "";
+      document.getElementById("barcodeInput").focus();
+      updateTable();
+    }
+
+    function updateTable() {
+      const tbody = document.querySelector("#dataTable tbody");
+      tbody.innerHTML = "";
+
+      dataScan.forEach((item, index) => {
+        const row = tbody.insertRow();
+        row.insertCell().innerText = item.lokasi;
+        row.insertCell().innerText = item.barcode;
+        row.insertCell().innerText = item.nama;
+        row.insertCell().innerText = item.qty;
+
+        const aksiCell = row.insertCell();
+        const editBtn = document.createElement("button");
+        editBtn.textContent = "Edit Qty";
+        editBtn.onclick = () => {
+          const newQty = prompt("Masukkan Qty baru:", item.qty);
+          if (newQty !== null && !isNaN(newQty)) {
+            item.qty = parseInt(newQty);
+            saveDataToLocalStorage();
+            updateTable();
+          }
+        };
+        aksiCell.appendChild(editBtn);
+
+        const delBtn = document.createElement("button");
+        delBtn.textContent = "Hapus";
+        delBtn.style.marginLeft = "5px";
+        delBtn.onclick = () => {
+          if (confirm("Yakin ingin menghapus baris ini?")) {
+            dataScan.splice(index, 1);
+            saveDataToLocalStorage();
+            updateTable();
+          }
+        };
+        aksiCell.appendChild(delBtn);
+      });
+    }
+
+    function exportData() {
+      if (dataScan.length === 0) {
+        alert("Tidak ada data untuk disimpan.");
+        return;
+      }
+
+      const ws = XLSX.utils.json_to_sheet(dataScan);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Stok Barang");
+      XLSX.writeFile(wb, "stok_barang.xlsx");
+    }
+
+    function saveToGoogleSheet() {
+      if (dataScan.length === 0) {
+        alert("Tidak ada data untuk disimpan.");
+        return;
+      }
+
+      const lokasi = document.getElementById("lokasiInput").value;
+      if (!lokasiTerkunci || !lokasi) {
+        alert("Kunci lokasi terlebih dahulu dan pastikan lokasi sudah diisi.");
+        return;
+      }
+
+      const dataToSend = {
+        spreadsheetId: SPREADSHEET_ID,
+        sheetName: SHEET_NAME,
+        data: dataScan.map(item => ({
+          ...item,
+          timestamp: new Date().toISOString()
+        }))
+      };
+
+      // Tampilkan loading indicator
+      const saveBtn = document.querySelector('button[onclick="saveToGoogleSheet()"]');
+      const originalText = saveBtn.textContent;
+      saveBtn.textContent = "Menyimpan...";
+      saveBtn.disabled = true;
+
+      fetch(APP_SCRIPT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(dataToSend)
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (data.success) {
+          alert(`✅ Data berhasil disimpan ke Google Sheet! ${data.rowsAdded} baris ditambahkan.`);
+        } else {
+          alert(`❌ Gagal menyimpan data: ${data.message}`);
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert("Terjadi kesalahan saat menyimpan data. Silakan coba lagi atau export manual.");
+      })
+      .finally(() => {
+        saveBtn.textContent = originalText;
+        saveBtn.disabled = false;
+      });
+    }
+
+    function startScanner() {
+      const readerDiv = document.getElementById("reader");
+      readerDiv.style.display = "block";
+
+      if (scanner && scanner.isScanning) {
+        scanner.stop();
+      }
+
+      scanner = new Html5Qrcode("reader");
+      scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 250, height: 150 } },
+        (decodedText) => {
+          document.getElementById("barcodeInput").value = decodedText;
+          const nama = dataBarang[decodedText];
+          document.getElementById("namaBarangInput").value = nama || "Barang tidak ditemukan";
+          scanner.stop().then(() => {
+            readerDiv.innerHTML = "";
+            readerDiv.style.display = "none";
+            document.getElementById("qtyInput").focus();
+          });
+        },
+        (errorMsg) => {
+          // console.log("Scanning...", errorMsg);
+        }
+      ).catch((err) => {
+        alert("Gagal membuka kamera: " + err);
+        readerDiv.style.display = "none";
+      });
+    }
+
+    function hapusSemuaData() {
+      if (confirm("Yakin ingin menghapus semua data?")) {
+        dataScan = [];
+        saveDataToLocalStorage();
+        updateTable();
+      }
+    }
+
+    // Initialize on load
+    window.onload = function() {
+      loadDataFromLocalStorage();
+      document.getElementById("barcodeInput").focus();
+    };
+  </script>
+</body>
+</html>
+
+
       }
 
       const lokasi = document.getElementById("lokasiInput").value;
@@ -544,6 +743,7 @@
   </script>
 </body>
 </html>
+
 
 
 
