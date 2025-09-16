@@ -6,6 +6,8 @@
   <title>Scanner Stok Barang</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode"></script>
+  <!-- Tambahkan library Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <style>
     body { font-family: Arial; padding: 20px; background: #f8f8f8; }
     label, input, button { margin: 5px 0; display: block; }
@@ -61,6 +63,56 @@
       gap: 10px;
       margin-top: 20px;
     }
+    
+    /* Loading spinner */
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    /* Tampilan untuk daftar user */
+    .user-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 10px 0;
+    }
+    .user-button {
+      padding: 8px 12px;
+      background: #e0e0e0;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .user-button.active {
+      background: #4CAF50;
+      color: white;
+    }
+    
+    /* Status kamera */
+    .camera-status {
+      margin: 10px 0;
+      padding: 8px;
+      border-radius: 4px;
+      text-align: center;
+    }
+    .camera-status.active {
+      background: #d4edda;
+      color: #155724;
+    }
+    .camera-status.inactive {
+      background: #f8d7da;
+      color: #721c24;
+    }
   </style>
 </head>
 <body>
@@ -79,6 +131,41 @@
     </div>
   </div>
 
+  <!-- Modal Supabase Settings -->
+  <div id="supabaseModal" class="modal">
+    <div class="modal-content">
+      <h3>Konfigurasi Supabase</h3>
+      <p>Masukkan kredensial Supabase Anda:</p>
+      <label>URL Supabase:</label>
+      <input type="text" id="supabaseUrl" placeholder="https://your-project.supabase.co" />
+      <label>API Key:</label>
+      <input type="password" id="supabaseKey" placeholder="Your API Key" />
+      <div class="modal-buttons">
+        <button onclick="saveSupabaseConfig()" style="background-color: #4CAF50; color: white;">Simpan</button>
+        <button onclick="document.getElementById('supabaseModal').style.display='none'" style="background-color: #f44336; color: white;">Batal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Download Supabase -->
+  <div id="downloadModal" class="modal">
+    <div class="modal-content">
+      <h3>Download Data dari Supabase</h3>
+      <label>Tanggal Mulai:</label>
+      <input type="date" id="startDate" />
+      <label>Tanggal Selesai:</label>
+      <input type="date" id="endDate" />
+      <label>User:</label>
+      <div id="userList" class="user-list">
+        <button class="user-button active" onclick="toggleUserSelection('all')">Semua User</button>
+      </div>
+      <div class="modal-buttons">
+        <button onclick="downloadSupabaseData()" style="background-color: #4CAF50; color: white;">Download</button>
+        <button onclick="document.getElementById('downloadModal').style.display='none'" style="background-color: #f44336; color: white;">Batal</button>
+      </div>
+    </div>
+  </div>
+
   <div class="tab-container">
     <div class="tab active" onclick="openTab('scanTab')">Mode Scan</div>
     <div class="tab" onclick="openTab('uploadTab')">Mode Upload Data</div>
@@ -86,6 +173,9 @@
 
   <!-- Scan Tab -->
   <div id="scanTab" class="tab-content active">
+    <label>User:</label>
+    <input type="text" id="userInput" placeholder="Nama user" value="User 1" />
+    
     <label>Nama Lokasi:</label>
     <input type="text" id="lokasiInput" placeholder="Contoh: Area A" />
     <div class="lokasi-buttons">
@@ -103,7 +193,8 @@
 
     <label>Scan Barcode:</label>
     <input type="text" id="barcodeInput" placeholder="Scan barcode..." autofocus />
-    <button onclick="startScanner()">📷 Scan Kamera</button>
+    <button onclick="toggleScanner()" id="scannerButton">📷 Aktifkan Kamera</button>
+    <div id="cameraStatus" class="camera-status inactive">Kamera tidak aktif</div>
     <div id="reader"></div>
 
     <label>Nama Barang:</label>
@@ -118,6 +209,7 @@
     <table id="dataTable">
       <thead>
         <tr>
+          <th>User</th>
           <th>Lokasi</th>
           <th>Barcode</th>
           <th>Nama Barang</th>
@@ -131,6 +223,9 @@
 
   <!-- Upload Data Tab -->
   <div id="uploadTab" class="tab-content">
+    <label>User:</label>
+    <input type="text" id="uploadUserInput" placeholder="Nama user" value="User 1" />
+    
     <label>Nama Lokasi:</label>
     <input type="text" id="uploadLokasiInput" placeholder="Contoh: Area A" />
     <div class="lokasi-buttons">
@@ -166,8 +261,11 @@
   </div>
 
   <div class="button-group">
-    <button onclick="exportData()">Export File</button>
-    <button onclick="saveToGoogleSheet()" style="background-color: #34a853; color: white;">Simpan ke Google Sheet</button>
+    <button onclick="exportData()">Download Data (Excel)</button>
+    <button onclick="exportDataCSV()">Download Data (CSV)</button>
+    <button onclick="saveToSupabase()" style="background-color: #3b82f6; color: white;">Simpan ke Supabase</button>
+    <button onclick="showDownloadModal()" style="background-color: #8b5cf6; color: white;">Download dari Supabase</button>
+    <button onclick="showSupabaseConfig()" style="background-color: #6b7280; color: white;">Supabase Settings</button>
     <button onclick="hapusSemuaData()" style="background-color: red; color: white;">Hapus Semua Data</button>
   </div>
 
@@ -176,16 +274,11 @@
     let dataScan = JSON.parse(localStorage.getItem("dataScan")) || [];
     let lokasiTerkunci = false;
     let uploadLokasiTerkunci = false;
-    let scanner;
+    let scanner = null;
     let uploadedItems = JSON.parse(localStorage.getItem("uploadedItems")) || [];
     let shouldConfirmLeave = false;
-
-    // Ganti dengan ID Spreadsheet Anda
-    const SPREADSHEET_ID = '1dtHGZesUkrZ5M81145ghA0vRDFWb5c4Xm6MwBGFOuAc';
-    const SHEET_NAME = 'Sheet1';
-    
-    // URL Apps Script deployment Anda
-    const APP_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyv0Hjs7qGztnkIhXXB9EbSbhHKJbqejNrxUHZhmVqHKs7l0SNmAF5L5gsHVDLgIKCT/exec';
+    let supabase = null;
+    let cameraActive = false;
 
     // Fungsi untuk menampilkan modal konfirmasi
     function showConfirmModal() {
@@ -203,45 +296,10 @@
       }
     }
 
-    // Event listener untuk beforeunload
-    window.addEventListener('beforeunload', (event) => {
-      if (shouldConfirmLeave) {
-        event.preventDefault();
-        event.returnValue = '';
-        return '';
-      }
-    });
-
-    // Event listener untuk unload
-    window.addEventListener('unload', () => {
-      // Reset flag saat halaman benar-benar di-unload
-      shouldConfirmLeave = false;
-    });
-
-    // Intercept semua link dan form yang menyebabkan navigasi
-    document.addEventListener('click', (e) => {
-      const target = e.target.closest('a') || e.target.closest('button');
-      if (target && (target.tagName === 'A' || target.tagName === 'BUTTON')) {
-        if (shouldConfirmLeave && !target.hasAttribute('data-safe')) {
-          e.preventDefault();
-          showConfirmModal().then((shouldLeave) => {
-            if (shouldLeave) {
-              shouldConfirmLeave = false;
-              if (target.tagName === 'A') {
-                window.location.href = target.href;
-              } else {
-                target.click();
-              }
-            }
-          });
-        }
-      }
-    });
-
     function saveDataToLocalStorage() {
       localStorage.setItem("dataScan", JSON.stringify(dataScan));
       localStorage.setItem("uploadedItems", JSON.stringify(uploadedItems));
-      shouldConfirmLeave = (uploadedItems.length > 0);
+      shouldConfirmLeave = (dataScan.length > 0 || uploadedItems.length > 0);
     }
 
     function loadDataFromLocalStorage() {
@@ -249,7 +307,179 @@
       updateUploadedItemsTable();
       
       // Set flag konfirmasi berdasarkan ada tidaknya data yang belum disimpan
-      shouldConfirmLeave = (uploadedItems.length > 0);
+      shouldConfirmLeave = (dataScan.length > 0 || uploadedItems.length > 0);
+      
+      // Cek apakah konfigurasi Supabase sudah ada
+      const supabaseUrl = localStorage.getItem("supabaseUrl");
+      const supabaseKey = localStorage.getItem("supabaseKey");
+      
+      if (supabaseUrl && supabaseKey) {
+        initSupabase(supabaseUrl, supabaseKey);
+      }
+    }
+
+    function initSupabase(url, key) {
+      try {
+        supabase = window.supabase.createClient(url, key);
+        console.log("Supabase initialized successfully");
+        return true;
+      } catch (error) {
+        console.error("Error initializing Supabase:", error);
+        alert("Gagal menginisialisasi Supabase. Periksa kredensial Anda.");
+        return false;
+      }
+    }
+
+    function showSupabaseConfig() {
+      document.getElementById('supabaseUrl').value = localStorage.getItem("supabaseUrl") || "";
+      document.getElementById('supabaseKey').value = localStorage.getItem("supabaseKey") || "";
+      document.getElementById('supabaseModal').style.display = 'block';
+    }
+
+    function saveSupabaseConfig() {
+      const url = document.getElementById('supabaseUrl').value.trim();
+      const key = document.getElementById('supabaseKey').value.trim();
+      
+      if (!url || !key) {
+        alert("URL dan API Key Supabase harus diisi.");
+        return;
+      }
+      
+      localStorage.setItem("supabaseUrl", url);
+      localStorage.setItem("supabaseKey", key);
+      
+      if (initSupabase(url, key)) {
+        alert("Konfigurasi Supabase berhasil disimpan.");
+        document.getElementById('supabaseModal').style.display = 'none';
+      }
+    }
+
+    function showDownloadModal() {
+      if (!supabase) {
+        alert("Silakan konfigurasi Supabase terlebih dahulu.");
+        showSupabaseConfig();
+        return;
+      }
+      
+      // Set tanggal default (hari ini)
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('startDate').value = today;
+      document.getElementById('endDate').value = today;
+      
+      // Load daftar user dari Supabase
+      loadUsersFromSupabase();
+      
+      document.getElementById('downloadModal').style.display = 'block';
+    }
+
+    async function loadUsersFromSupabase() {
+      try {
+        const { data, error } = await supabase
+          .from('stok_barang')
+          .select('user')
+          .order('user', { ascending: true });
+          
+        if (error) throw error;
+        
+        const userList = document.getElementById('userList');
+        userList.innerHTML = '<button class="user-button active" onclick="toggleUserSelection(\'all\')">Semua User</button>';
+        
+        if (data && data.length > 0) {
+          // Ambil user unik
+          const uniqueUsers = [...new Set(data.map(item => item.user))].filter(user => user);
+          
+          uniqueUsers.forEach(user => {
+            const button = document.createElement('button');
+            button.className = 'user-button';
+            button.textContent = user;
+            button.onclick = () => toggleUserSelection(user);
+            userList.appendChild(button);
+          });
+        }
+      } catch (error) {
+        console.error('Error loading users:', error);
+        alert('Gagal memuat daftar user: ' + error.message);
+      }
+    }
+
+    function toggleUserSelection(user) {
+      const buttons = document.querySelectorAll('.user-button');
+      
+      if (user === 'all') {
+        buttons.forEach(btn => {
+          if (btn.textContent === 'Semua User') {
+            btn.classList.add('active');
+          } else {
+            btn.classList.remove('active');
+          }
+        });
+      } else {
+        buttons.forEach(btn => {
+          if (btn.textContent === 'Semua User') {
+            btn.classList.remove('active');
+          }
+        });
+        
+        const selectedButton = Array.from(buttons).find(btn => btn.textContent === user);
+        if (selectedButton) {
+          selectedButton.classList.toggle('active');
+        }
+      }
+    }
+
+    async function downloadSupabaseData() {
+      const startDate = document.getElementById('startDate').value;
+      const endDate = document.getElementById('endDate').value;
+      
+      if (!startDate || !endDate) {
+        alert('Pilih tanggal mulai dan tanggal selesai.');
+        return;
+      }
+      
+      // Ambil user yang dipilih
+      const selectedUsers = [];
+      const userButtons = document.querySelectorAll('.user-button.active');
+      userButtons.forEach(button => {
+        if (button.textContent !== 'Semua User') {
+          selectedUsers.push(button.textContent);
+        }
+      });
+      
+      try {
+        // Buat query berdasarkan filter
+        let query = supabase
+          .from('stok_barang')
+          .select('*')
+          .gte('created_at', `${startDate}T00:00:00`)
+          .lte('created_at', `${endDate}T23:59:59`);
+          
+        // Jika tidak memilih "Semua User" dan ada user yang dipilih
+        if (selectedUsers.length > 0) {
+          query = query.in('user', selectedUsers);
+        }
+        
+        const { data, error } = await query.order('created_at', { ascending: false });
+        
+        if (error) throw error;
+        
+        if (!data || data.length === 0) {
+          alert('Tidak ada data untuk rentang tanggal dan user yang dipilih.');
+          return;
+        }
+        
+        // Download data
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Stok Barang");
+        XLSX.writeFile(wb, `stok_barang_${startDate}_${endDate}.xlsx`);
+        
+        document.getElementById('downloadModal').style.display = 'none';
+        alert(`Berhasil mendownload ${data.length} data.`);
+        
+      } catch (error) {
+        console.error('Error downloading data:', error);
+        alert('Gagal mendownload data: ' + error.message);
+      }
     }
 
     function openTab(tabId) {
@@ -262,6 +492,11 @@
         tab.classList.remove('active');
       });
       event.currentTarget.classList.add('active');
+      
+      // Jika berpindah tab, matikan kamera
+      if (cameraActive) {
+        toggleScanner();
+      }
     }
 
     function lockLokasi() {
@@ -452,15 +687,17 @@
         return;
       }
 
+      const user = document.getElementById("uploadUserInput").value || "Unknown";
       const lokasi = document.getElementById("uploadLokasiInput").value;
       
       uploadedItems.forEach(item => {
-        const index = dataScan.findIndex(scan => scan.barcode === item.barcode && scan.lokasi === lokasi);
+        const index = dataScan.findIndex(scan => scan.barcode === item.barcode && scan.lokasi === lokasi && scan.user === user);
         
         if (index > -1) {
           dataScan[index].qty += item.qty;
         } else {
           dataScan.push({
+            user: user,
             lokasi: lokasi,
             barcode: item.barcode,
             nama: item.nama,
@@ -497,6 +734,7 @@
         return;
       }
 
+      const user = document.getElementById("userInput").value || "Unknown";
       const lokasi = document.getElementById("lokasiInput").value;
       const barcode = document.getElementById("barcodeInput").value.trim();
       const nama = document.getElementById("namaBarangInput").value;
@@ -507,11 +745,12 @@
         return;
       }
 
-      const index = dataScan.findIndex(item => item.barcode === barcode && item.lokasi === lokasi);
+      const index = dataScan.findIndex(item => item.barcode === barcode && item.lokasi === lokasi && item.user === user);
       if (index > -1) {
         dataScan[index].qty += qty;
       } else {
         dataScan.push({ 
+          user: user,
           lokasi, 
           barcode, 
           nama: nama || "Barang tidak dikenal", 
@@ -533,6 +772,7 @@
 
       dataScan.forEach((item, index) => {
         const row = tbody.insertRow();
+        row.insertCell().innerText = item.user || "Unknown";
         row.insertCell().innerText = item.lokasi;
         row.insertCell().innerText = item.barcode;
         row.insertCell().innerText = item.nama;
@@ -577,92 +817,158 @@
       XLSX.writeFile(wb, "stok_barang.xlsx");
     }
 
-    function saveToGoogleSheet() {
+    function exportDataCSV() {
       if (dataScan.length === 0) {
         alert("Tidak ada data untuk disimpan.");
         return;
       }
 
-      const lokasi = document.getElementById("lokasiInput").value;
-      if (!lokasiTerkunci || !lokasi) {
-        alert("Kunci lokasi terlebih dahulu dan pastikan lokasi sudah diisi.");
+      const ws = XLSX.utils.json_to_sheet(dataScan);
+      const csv = XLSX.utils.sheet_to_csv(ws);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      
+      link.setAttribute("href", url);
+      link.setAttribute("download", "stok_barang.csv");
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    async function saveToSupabase() {
+      if (!supabase) {
+        alert("Silakan konfigurasi Supabase terlebih dahulu.");
+        showSupabaseConfig();
         return;
       }
 
-      const dataToSend = {
-        spreadsheetId: SPREADSHEET_ID,
-        sheetName: SHEET_NAME,
-        data: dataScan.map(item => ({
-          ...item,
-          timestamp: new Date().toISOString()
-        }))
-      };
-
-      // Tampilkan loading indicator
-      const saveBtn = document.querySelector('button[onclick="saveToGoogleSheet()"]');
-      const originalText = saveBtn.textContent;
-      saveBtn.textContent = "Menyimpan...";
-      saveBtn.disabled = true;
-
-      fetch(APP_SCRIPT_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(dataToSend)
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        return response.json();
-      })
-      .then(data => {
-        if (data.success) {
-          alert(`✅ Data berhasil disimpan ke Google Sheet! ${data.rowsAdded} baris ditambahkan.`);
-        } else {
-          alert(`❌ Gagal menyimpan data: ${data.message}`);
-        }
-      })
-      .catch(error => {
-        console.error('Error:', error);
-        alert("Terjadi kesalahan saat menyimpan data. Silakan coba lagi atau export manual.");
-      })
-      .finally(() => {
-        saveBtn.textContent = originalText;
-        saveBtn.disabled = false;
-      });
-    }
-
-    function startScanner() {
-      const readerDiv = document.getElementById("reader");
-      readerDiv.style.display = "block";
-
-      if (scanner && scanner.isScanning) {
-        scanner.stop();
+      if (dataScan.length === 0) {
+        alert("Tidak ada data untuk disimpan.");
+        return;
       }
 
-      scanner = new Html5Qrcode("reader");
-      scanner.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 150 } },
-        (decodedText) => {
-          document.getElementById("barcodeInput").value = decodedText;
-          const nama = dataBarang[decodedText];
-          document.getElementById("namaBarangInput").value = nama || "Barang tidak ditemukan";
-          scanner.stop().then(() => {
-            readerDiv.innerHTML = "";
-            readerDiv.style.display = "none";
-            document.getElementById("qtyInput").focus();
-          });
-        },
-        (errorMsg) => {
-          // console.log("Scanning...", errorMsg);
+      const saveBtn = document.querySelector('button[onclick="saveToSupabase()"]');
+      const originalText = saveBtn.textContent;
+      saveBtn.innerHTML = '<div class="spinner"></div>';
+      saveBtn.disabled = true;
+
+      try {
+        // Tambahkan timestamp ke setiap data
+        const dataToSave = dataScan.map(item => ({
+          ...item,
+          created_at: new Date().toISOString()
+        }));
+
+        const { data, error } = await supabase
+          .from('stok_barang')
+          .insert(dataToSave);
+
+        if (error) {
+          throw error;
         }
-      ).catch((err) => {
-        alert("Gagal membuka kamera: " + err);
+
+        alert(`✅ Data berhasil disimpan ke Supabase! ${dataToSave.length} baris ditambahkan.`);
+        
+        // Hapus data setelah berhasil disimpan
+        dataScan = [];
+        saveDataToLocalStorage();
+        updateTable();
+        
+      } catch (error) {
+        console.error('Error saving to Supabase:', error);
+        alert("❌ Gagal menyimpan data ke Supabase: " + error.message);
+      } finally {
+        saveBtn.textContent = originalText;
+        saveBtn.disabled = false;
+      }
+    }
+
+    async function toggleScanner() {
+      const readerDiv = document.getElementById("reader");
+      const scannerButton = document.getElementById("scannerButton");
+      const cameraStatus = document.getElementById("cameraStatus");
+      
+      // Hentikan scanner jika sedang aktif
+      if (scanner && cameraActive) {
+        try {
+          await scanner.stop();
+          cameraActive = false;
+          readerDiv.style.display = "none";
+          readerDiv.innerHTML = "";
+          scannerButton.textContent = "📷 Aktifkan Kamera";
+          cameraStatus.textContent = "Kamera tidak aktif";
+          cameraStatus.className = "camera-status inactive";
+          return;
+        } catch (error) {
+          console.error("Error stopping scanner:", error);
+        }
+      }
+      
+      // Mulai scanner
+      readerDiv.style.display = "block";
+      readerDiv.innerHTML = "<div>Menginisialisasi kamera...</div>";
+
+      try {
+        scanner = new Html5Qrcode("reader");
+        
+        await scanner.start(
+          { facingMode: "environment" },
+          { 
+            fps: 10, 
+            qrbox: { width: 250, height: 150 },
+            aspectRatio: 1.0
+          },
+          (decodedText) => {
+            document.getElementById("barcodeInput").value = decodedText;
+            const nama = dataBarang[decodedText];
+            document.getElementById("namaBarangInput").value = nama || "Barang tidak ditemukan";
+            
+            // Stop scanner setelah berhasil scan
+            scanner.stop().then(() => {
+              cameraActive = false;
+              readerDiv.innerHTML = "";
+              readerDiv.style.display = "none";
+              scannerButton.textContent = "📷 Aktifkan Kamera";
+              cameraStatus.textContent = "Kamera tidak aktif";
+              cameraStatus.className = "camera-status inactive";
+              document.getElementById("qtyInput").focus();
+            }).catch(err => {
+              console.error("Error stopping scanner:", err);
+            });
+          },
+          (errorMsg) => {
+            // Error handling yang lebih baik
+            if (errorMsg && !errorMsg.includes("NotFoundException")) {
+              console.log("Scanning...", errorMsg);
+            }
+          }
+        );
+        
+        cameraActive = true;
+        scannerButton.textContent = "🛑 Matikan Kamera";
+        cameraStatus.textContent = "Kamera aktif - Arahkan ke barcode";
+        cameraStatus.className = "camera-status active";
+        
+      } catch (err) {
+        console.error("Error starting scanner:", err);
+        
+        if (err.includes("NotAllowedError")) {
+          alert("Izin akses kamera ditolak. Silakan izinkan akses kamera di pengaturan browser Anda.");
+        } else if (err.includes("NotFoundError") || err.includes("OverconstrainedError")) {
+          alert("Kamera tidak ditemukan. Pastikan perangkat memiliki kamera yang berfungsi.");
+        } else {
+          alert("Gagal membuka kamera: " + err);
+        }
+        
         readerDiv.style.display = "none";
-      });
+        cameraActive = false;
+        scannerButton.textContent = "📷 Aktifkan Kamera";
+        cameraStatus.textContent = "Kamera tidak aktif";
+        cameraStatus.className = "camera-status inactive";
+      }
     }
 
     function hapusSemuaData() {
