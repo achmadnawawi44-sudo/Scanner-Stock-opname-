@@ -113,6 +113,44 @@
       background: #f8d7da;
       color: #721c24;
     }
+    
+    /* Progress bar */
+    .progress-container {
+      width: 100%;
+      background-color: #f0f0f0;
+      border-radius: 5px;
+      margin: 10px 0;
+      display: none;
+    }
+    .progress-bar {
+      width: 0%;
+      height: 20px;
+      background-color: #4CAF50;
+      border-radius: 5px;
+      text-align: center;
+      color: white;
+      line-height: 20px;
+      transition: width 0.3s ease;
+    }
+    
+    /* Status download */
+    .download-status {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+      display: none;
+    }
+    .download-status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .download-status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
   </style>
 </head>
 <body>
@@ -159,9 +197,18 @@
       <div id="userList" class="user-list">
         <button class="user-button active" onclick="toggleUserSelection('all')">Semua User</button>
       </div>
+      
+      <!-- Progress Bar -->
+      <div id="progressContainer" class="progress-container">
+        <div id="progressBar" class="progress-bar">0%</div>
+      </div>
+      
+      <!-- Status Download -->
+      <div id="downloadStatus" class="download-status"></div>
+      
       <div class="modal-buttons">
-        <button onclick="downloadSupabaseData()" style="background-color: #4CAF50; color: white;">Download</button>
-        <button onclick="document.getElementById('downloadModal').style.display='none'" style="background-color: #f44336; color: white;">Batal</button>
+        <button onclick="downloadSupabaseData()" style="background-color: #4CAF50; color: white;" id="downloadButton">Download</button>
+        <button onclick="closeDownloadModal()" style="background-color: #f44336; color: white;">Batal</button>
       </div>
     </div>
   </div>
@@ -278,6 +325,7 @@
     let shouldConfirmLeave = false;
     let supabase = null;
     let cameraActive = false;
+    let isDownloading = false;
 
     // Fungsi untuk menampilkan modal konfirmasi
     function showConfirmModal() {
@@ -365,10 +413,21 @@
       document.getElementById('startDate').value = today;
       document.getElementById('endDate').value = today;
       
+      // Reset UI
+      document.getElementById('progressContainer').style.display = 'none';
+      document.getElementById('downloadStatus').style.display = 'none';
+      document.getElementById('downloadButton').disabled = false;
+      document.getElementById('downloadButton').textContent = 'Download';
+      
       // Load daftar user dari Supabase
       loadUsersFromSupabase();
       
       document.getElementById('downloadModal').style.display = 'block';
+    }
+
+    function closeDownloadModal() {
+      document.getElementById('downloadModal').style.display = 'none';
+      isDownloading = false;
     }
 
     async function loadUsersFromSupabase() {
@@ -427,6 +486,8 @@
     }
 
     async function downloadSupabaseData() {
+      if (isDownloading) return;
+      
       const startDate = document.getElementById('startDate').value;
       const endDate = document.getElementById('endDate').value;
       
@@ -444,42 +505,115 @@
         }
       });
       
+      isDownloading = true;
+      const downloadButton = document.getElementById('downloadButton');
+      downloadButton.disabled = true;
+      downloadButton.textContent = 'Downloading...';
+      
+      const progressContainer = document.getElementById('progressContainer');
+      const progressBar = document.getElementById('progressBar');
+      const downloadStatus = document.getElementById('downloadStatus');
+      
+      progressContainer.style.display = 'block';
+      downloadStatus.style.display = 'none';
+      
       try {
-        // Buat query berdasarkan filter
-        let query = supabase
+        // Pertama, hitung total data yang akan diambil
+        let countQuery = supabase
           .from('stok_barang')
-          .select('*')
+          .select('*', { count: 'exact', head: true })
           .gte('created_at', `${startDate}T00:00:00`)
           .lte('created_at', `${endDate}T23:59:59`);
           
-        // Jika tidak memilih "Semua User" dan ada user yang dipilih
         if (selectedUsers.length > 0) {
-          query = query.in('user', selectedUsers);
+          countQuery = countQuery.in('user', selectedUsers);
         }
         
-        const { data, error } = await query.order('created_at', { ascending: false });
+        const { count, error: countError } = await countQuery;
         
-        if (error) throw error;
+        if (countError) throw countError;
         
-        if (!data || data.length === 0) {
-          alert('Tidak ada data untuk rentang tanggal dan user yang dipilih.');
-          return;
+        if (!count || count === 0) {
+          throw new Error('Tidak ada data untuk rentang tanggal dan user yang dipilih.');
         }
         
-        // Download data
-        const ws = XLSX.utils.json_to_sheet(data);
+        downloadStatus.style.display = 'block';
+        downloadStatus.className = 'download-status';
+        downloadStatus.textContent = `Menemukan ${count} data. Mulai download...`;
+        
+        let allData = [];
+        const batchSize = 1000; // Sesuai dengan limit Supabase
+        let currentBatch = 0;
+        const totalBatches = Math.ceil(count / batchSize);
+        
+        // Loop untuk mengambil semua data dengan pagination
+        for (let from = 0; from < count; from += batchSize) {
+          currentBatch++;
+          const to = Math.min(from + batchSize - 1, count - 1);
+          
+          // Update progress
+          const progress = Math.round((from / count) * 100);
+          progressBar.style.width = `${progress}%`;
+          progressBar.textContent = `${progress}% (Batch ${currentBatch}/${totalBatches})`;
+          
+          // Buat query untuk batch saat ini
+          let query = supabase
+            .from('stok_barang')
+            .select('*')
+            .gte('created_at', `${startDate}T00:00:00`)
+            .lte('created_at', `${endDate}T23:59:59`)
+            .range(from, to)
+            .order('created_at', { ascending: false });
+            
+          if (selectedUsers.length > 0) {
+            query = query.in('user', selectedUsers);
+          }
+          
+          const { data, error } = await query;
+          
+          if (error) throw error;
+          
+          if (data && data.length > 0) {
+            allData = allData.concat(data);
+            downloadStatus.textContent = `Downloading... ${allData.length}/${count} data (Batch ${currentBatch}/${totalBatches})`;
+          }
+          
+          // Beri jeda kecil antara batch untuk menghindari rate limiting
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        // Update progress ke 100%
+        progressBar.style.width = '100%';
+        progressBar.textContent = '100%';
+        
+        // Download data ke Excel
+        const ws = XLSX.utils.json_to_sheet(allData);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Stok Barang");
         XLSX.writeFile(wb, `stok_barang_${startDate}_${endDate}.xlsx`);
         
-        document.getElementById('downloadModal').style.display = 'none';
-        alert(`Berhasil mendownload ${data.length} data.`);
+        // Tampilkan status sukses
+        downloadStatus.className = 'download-status success';
+        downloadStatus.textContent = `✅ Berhasil mendownload ${allData.length} data! File akan otomatis terdownload.`;
+        
+        // Tunggu sebentar sebelum menutup modal
+        setTimeout(() => {
+          closeDownloadModal();
+        }, 3000);
         
       } catch (error) {
         console.error('Error downloading data:', error);
-        alert('Gagal mendownload data: ' + error.message);
+        downloadStatus.style.display = 'block';
+        downloadStatus.className = 'download-status error';
+        downloadStatus.textContent = `❌ Gagal mendownload data: ${error.message}`;
+      } finally {
+        isDownloading = false;
+        downloadButton.disabled = false;
+        downloadButton.textContent = 'Download';
       }
     }
+
+    // ... (fungsi-fungsi lainnya tetap sama, tidak berubah)
 
     function openTab(tabId) {
       document.querySelectorAll('.tab-content').forEach(tab => {
