@@ -756,7 +756,7 @@
       }, 500);
     }
 
-    // =============== FUNGSI LOAD SEMUA DATA DARI SUPABASE ===============
+    // =============== FUNGSI LOAD SEMUA DATA DARI SUPABASE (DIPERBAIKI) ===============
     async function loadProdukDataFromSupabase() {
       if (!supabaseClient) {
         updateProdukStatus("❌ Supabase tidak terhubung", "error");
@@ -814,7 +814,7 @@
         const pageSize = 1000; // Max rows per request dari Supabase
         const totalPages = Math.ceil(totalData / pageSize);
         let allProducts = [];
-        let duplicateBarcodes = new Set();
+        let duplicateBarcodes = [];
         
         updateProdukLoadingProgress(
           10,
@@ -861,7 +861,7 @@
           }
         }
         
-        // 3. PROCESS DATA
+        // 3. PROCESS DATA - PERBAIKAN: TIDAK MENGHILANGKAN DUPLICATE
         updateProdukLoadingProgress(90, 'Memproses data yang diambil...', 'Mengorganisir data...');
         
         if (allProducts.length === 0) {
@@ -876,25 +876,32 @@
         produkData = {};
         dataBarang = {};
         
-        // Isi produkData dengan mapping barcode → nama
+        // PERBAIKAN: Simpan SEMUA data, termasuk duplicate
+        // Tidak menggunakan Set() yang menghilangkan duplicate
         let loadedCount = 0;
         let duplicateCount = 0;
-        const barcodeSet = new Set();
+        const barcodeMap = new Map(); // Untuk melacak duplicate
         
         allProducts.forEach(item => {
           const barcode = item[barcodeField]?.toString().trim();
           const nama = item[namaField]?.toString().trim();
           
           if (barcode && nama) {
-            if (barcodeSet.has(barcode)) {
+            // Catat jika ada barcode duplicate
+            if (produkData[barcode]) {
               duplicateCount++;
-              duplicateBarcodes.add(barcode);
+              duplicateBarcodes.push(barcode);
+              // Untuk barcode duplicate, kita buat key unik
+              const uniqueKey = `${barcode}_${duplicateCount}`;
+              produkData[uniqueKey] = nama;
+              dataBarang[uniqueKey] = nama;
             } else {
-              barcodeSet.add(barcode);
+              // Simpan dengan key asli
               produkData[barcode] = nama;
               dataBarang[barcode] = nama;
-              loadedCount++;
+              barcodeMap.set(barcode, true);
             }
+            loadedCount++;
           }
         });
         
@@ -938,11 +945,11 @@
           
           let statusMessage = `✅ ${loadedCount.toLocaleString()} produk dimuat`;
           if (duplicateCount > 0) {
-            statusMessage += ` (${duplicateCount} duplikat diabaikan)`;
+            statusMessage += ` (${duplicateCount} barcode duplicate ditemukan)`;
             
-            // Tampilkan warning jika ada duplikat banyak
-            if (duplicateCount > 10) {
-              console.warn('Barcode duplikat ditemukan:', Array.from(duplicateBarcodes).slice(0, 10));
+            // Tampilkan info duplicate
+            if (duplicateCount > 0) {
+              console.log('Barcode duplicate ditemukan:', duplicateBarcodes.slice(0, 5));
             }
           }
           
@@ -959,7 +966,7 @@
           isFetchingAllProduk = false;
         }, 1000);
         
-        console.log(`✅ ${loadedCount} produk berhasil dimuat dari Supabase`);
+        console.log(`✅ ${loadedCount} produk berhasil dimuat dari Supabase (${duplicateCount} duplicate)`);
         return true;
         
       } catch (error) {
@@ -970,6 +977,66 @@
         isFetchingAllProduk = false;
         return false;
       }
+    }
+
+    // =============== FUNGSI PENCARIAN BARANG (DIPERBAIKI) ===============
+    async function cariBarangByBarcode(barcode) {
+      const barcodeStr = barcode.toString().trim();
+      
+      // 1. Cek cache langsung (paling cepat) - PERBAIKAN: cari semua kemungkinan
+      if (produkData[barcodeStr]) {
+        return produkData[barcodeStr];
+      }
+      
+      // 2. Cari juga dengan pattern duplicate
+      for (const [key, value] of Object.entries(produkData)) {
+        if (key.startsWith(barcodeStr + '_')) {
+          return value;
+        }
+      }
+      
+      // 3. Jika tidak ditemukan, coba cari dengan case-insensitive di array
+      if (produkArray && produkArray.length > 0) {
+        const found = produkArray.find(item => 
+          item.barcodeLower === barcodeStr.toLowerCase() || 
+          item.barcode.startsWith(barcodeStr + '_')
+        );
+        if (found) {
+          // Simpan ke cache untuk next time
+          produkData[barcodeStr] = found.nama;
+          return found.nama;
+        }
+      }
+      
+      // 4. Jika masih tidak ditemukan, cari langsung di Supabase (real-time)
+      if (supabaseClient) {
+        try {
+          const { data, error } = await supabaseClient
+            .from('produk')
+            .select('nama')
+            .eq('barcode', barcodeStr)
+            .maybeSingle();
+          
+          if (!error && data && data.nama) {
+            // Simpan ke cache
+            produkData[barcodeStr] = data.nama;
+            dataBarang[barcodeStr] = data.nama;
+            
+            // Tambahkan ke array untuk pencarian cepat
+            produkArray.push({
+              barcode: barcodeStr,
+              nama: data.nama,
+              barcodeLower: barcodeStr.toLowerCase()
+            });
+            
+            return data.nama;
+          }
+        } catch (error) {
+          console.error('Error mencari barang langsung:', error);
+        }
+      }
+      
+      return null;
     }
 
     // =============== FUNGSI PROGRESS BAR ===============
@@ -1098,59 +1165,540 @@
       produkLoadedTime = new Date().toISOString();
     }
 
-    // =============== FUNGSI PENCARIAN BARANG ===============
-    async function cariBarangByBarcode(barcode) {
-      const barcodeStr = barcode.toString().trim();
+    // =============== FUNGSI SCANNING ===============
+    async function handleBarcodeInput() {
+      const barcodeInput = document.getElementById("barcodeInput");
+      const namaBarangInput = document.getElementById("namaBarangInput");
+      const barcode = barcodeInput.value.trim();
       
-      // 1. Cek cache langsung (paling cepat)
-      if (produkData[barcodeStr]) {
-        return produkData[barcodeStr];
-      }
-      
-      // 2. Jika tidak ditemukan, coba cari dengan case-insensitive di array
-      if (produkArray && produkArray.length > 0) {
-        const found = produkArray.find(item => 
-          item.barcodeLower === barcodeStr.toLowerCase()
-        );
-        if (found) {
-          // Simpan ke cache untuk next time
-          produkData[barcodeStr] = found.nama;
-          return found.nama;
-        }
-      }
-      
-      // 3. Jika masih tidak ditemukan, cari langsung di Supabase (real-time)
-      if (supabaseClient) {
-        try {
-          const { data, error } = await supabaseClient
-            .from('produk')
-            .select('nama')
-            .eq('barcode', barcodeStr)
-            .maybeSingle();
+      if (barcode) {
+        // Reset new item form jika ada
+        hideNewItemForm();
+        
+        // Tampilkan loading state
+        namaBarangInput.value = "🔍 Mencari...";
+        namaBarangInput.style.color = "#666";
+        
+        // Beri jeda kecil untuk user melihat
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Cari barang
+        const namaBarang = await cariBarangByBarcode(barcode);
+        
+        if (namaBarang) {
+          namaBarangInput.value = namaBarang;
+          namaBarangInput.style.color = "#000";
           
-          if (!error && data && data.nama) {
-            // Simpan ke cache
-            produkData[barcodeStr] = data.nama;
-            dataBarang[barcodeStr] = data.nama;
-            
-            // Tambahkan ke array untuk pencarian cepat
-            produkArray.push({
-              barcode: barcodeStr,
-              nama: data.nama,
-              barcodeLower: barcodeStr.toLowerCase()
-            });
-            
-            return data.nama;
-          }
-        } catch (error) {
-          console.error('Error mencari barang langsung:', error);
+          // Auto-focus ke Qty input
+          setTimeout(() => {
+            document.getElementById("qtyInput").focus();
+            document.getElementById("qtyInput").select();
+          }, 100);
+        } else {
+          // Barang tidak ditemukan
+          namaBarangInput.value = "❌ Tidak ditemukan";
+          namaBarangInput.style.color = "#f44336";
+          
+          // Tampilkan form untuk menambahkan barang baru
+          showNewItemForm(barcode);
         }
       }
-      
-      return null;
     }
 
-    // =============== FUNGSI LAINNYA ===============
+    // =============== FUNGSI BARANG BARU ===============
+    function showNewItemForm(barcode) {
+      currentScannedBarcode = barcode;
+      
+      const form = document.getElementById("newItemForm");
+      const displayBarcode = document.getElementById("displayBarcode");
+      const namaInput = document.getElementById("newItemNameInput");
+      
+      if (form && displayBarcode && namaInput) {
+        displayBarcode.textContent = barcode;
+        namaInput.value = '';
+        namaInput.focus();
+        form.classList.add("show");
+      }
+    }
+
+    function hideNewItemForm() {
+      const form = document.getElementById("newItemForm");
+      if (form) {
+        form.classList.remove("show");
+      }
+      currentScannedBarcode = '';
+    }
+
+    // =============== FUNGSI SUPABASE ===============
+    function initSupabaseClient(url, key) {
+      try {
+        if (!url.startsWith('https://') || !url.includes('.supabase.co')) {
+          throw new Error('URL Supabase tidak valid.');
+        }
+        
+        if (key.length < 10) {
+          throw new Error('API Key tidak valid');
+        }
+        
+        supabaseClient = window.supabase.createClient(url, key);
+        console.log("Supabase initialized successfully");
+        return true;
+      } catch (error) {
+        console.error("Error initializing Supabase:", error);
+        return false;
+      }
+    }
+
+    function showSupabaseConfig() {
+      document.getElementById('supabaseUrl').value = localStorage.getItem("supabaseUrl") || "";
+      document.getElementById('supabaseKey').value = localStorage.getItem("supabaseKey") || "";
+      document.getElementById('supabaseModal').style.display = 'block';
+    }
+
+    function saveSupabaseConfig() {
+      const url = document.getElementById('supabaseUrl').value.trim();
+      const key = document.getElementById('supabaseKey').value.trim();
+      
+      if (!url || !key) {
+        alert("URL dan API Key Supabase harus diisi.");
+        return;
+      }
+      
+      if (!url.startsWith('https://') || !url.includes('.supabase.co')) {
+        alert("URL Supabase harus dalam format: https://your-project.supabase.co");
+        return;
+      }
+      
+      localStorage.setItem("supabaseUrl", url);
+      localStorage.setItem("supabaseKey", key);
+      
+      if (initSupabaseClient(url, key)) {
+        alert("✅ Konfigurasi Supabase berhasil disimpan.");
+        document.getElementById('supabaseModal').style.display = 'none';
+        
+        // Auto-load produk setelah konfigurasi
+        setTimeout(async () => {
+          await loadProdukDataFromSupabase();
+        }, 500);
+      }
+    }
+
+    // =============== FUNGSI MODAL LOKASI (DIPERBAIKI) ===============
+    async function showLocationDataModal() {
+      if (!supabaseClient) {
+        alert("Silakan konfigurasi Supabase terlebih dahulu.");
+        showSupabaseConfig();
+        return;
+      }
+      
+      if (isFetchingData) {
+        alert("Sedang mengambil data, harap tunggu...");
+        return;
+      }
+      
+      document.getElementById('locationModal').style.display = 'block';
+      await loadAllDataFromSupabase();
+    }
+
+    async function loadAllDataFromSupabase() {
+      if (isFetchingData) return;
+      
+      try {
+        isFetchingData = true;
+        const locationList = document.getElementById('locationList');
+        const progressBarContainer = document.getElementById('progressBarContainer');
+        const progressBar = document.getElementById('progressBar');
+        const loadingStatus = document.getElementById('loadingStatus');
+        const loadingDetails = document.getElementById('loadingDetails');
+        
+        if (!locationList) return;
+        
+        locationList.innerHTML = '<div style="text-align: center; padding: 20px;">Memuat data dari Supabase...</div>';
+        progressBarContainer.style.display = 'block';
+        progressBar.style.width = '0%';
+        progressBar.textContent = '0%';
+        loadingStatus.style.display = 'block';
+        
+        console.log('Memulai pengambilan data dari Supabase...');
+        
+        loadingDetails.textContent = 'Menghitung total data...';
+        
+        // Hitung total data dengan pagination
+        const { count, error: countError } = await supabaseClient
+          .from('stok_barang')
+          .select('*', { count: 'exact', head: true });
+        
+        if (countError) {
+          throw countError;
+        }
+        
+        const totalData = count || 0;
+        console.log(`Total data di Supabase: ${totalData}`);
+        loadingDetails.textContent = `Total data: ${totalData.toLocaleString()} item`;
+        
+        if (totalData === 0) {
+          locationList.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">Tidak ada data ditemukan di Supabase.</div>';
+          progressBarContainer.style.display = 'none';
+          loadingStatus.style.display = 'none';
+          isFetchingData = false;
+          return;
+        }
+        
+        // Ambil semua data dengan pagination
+        const pageSize = 1000;
+        const totalPages = Math.ceil(totalData / pageSize);
+        let allData = [];
+        
+        for (let page = 0; page < totalPages; page++) {
+          const from = page * pageSize;
+          const to = Math.min(from + pageSize - 1, totalData - 1);
+          
+          loadingDetails.textContent = `Mengambil data ${(from + 1).toLocaleString()}-${(to + 1).toLocaleString()} dari ${totalData.toLocaleString()}...`;
+          progressBar.style.width = `${((page + 1) / totalPages * 100).toFixed(0)}%`;
+          progressBar.textContent = `${((page + 1) / totalPages * 100).toFixed(0)}%`;
+          
+          console.log(`Mengambil halaman ${page + 1}/${totalPages}...`);
+          
+          const { data, error } = await supabaseClient
+            .from('stok_barang')
+            .select('barcode, nama, lokasi, qty, created_at')
+            .range(from, to)
+            .order('created_at', { ascending: true });
+          
+          if (error) {
+            throw error;
+          }
+          
+          if (data && data.length > 0) {
+            allData = allData.concat(data);
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        console.log(`Total data berhasil diambil: ${allData.length} baris`);
+        
+        if (allData.length === 0) {
+          locationList.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">Tidak ada data ditemukan di Supabase.</div>';
+          progressBarContainer.style.display = 'none';
+          loadingStatus.style.display = 'none';
+          isFetchingData = false;
+          return;
+        }
+        
+        loadingDetails.textContent = 'Mengelompokkan data berdasarkan lokasi...';
+        progressBar.style.width = '100%';
+        progressBar.textContent = '100%';
+        
+        const groupedData = {};
+        allData.forEach(item => {
+          const location = item.lokasi || 'Tidak Ada Lokasi';
+          if (!groupedData[location]) {
+            groupedData[location] = [];
+          }
+          groupedData[location].push(item);
+        });
+        
+        console.log(`Jumlah lokasi: ${Object.keys(groupedData).length}`);
+        
+        locationList.innerHTML = '';
+        const locations = Object.keys(groupedData).sort();
+        
+        const allButton = document.createElement('button');
+        allButton.className = 'user-button';
+        allButton.dataset.location = 'Semua Lokasi';
+        allButton.innerHTML = `
+          📁 Semua Lokasi
+          <span style="font-size: 11px; background: #666; color: white; padding: 2px 6px; border-radius: 10px; margin-left: 5px;">
+            ${allData.length.toLocaleString()}
+          </span>
+        `;
+        allButton.onclick = (e) => {
+          selectLocationInModal('Semua Lokasi', allData, e.target);
+        };
+        locationList.appendChild(allButton);
+        
+        locations.forEach(location => {
+          if (groupedData[location].length > 0) {
+            const button = document.createElement('button');
+            button.className = 'user-button';
+            button.dataset.location = location;
+            button.innerHTML = `
+              📍 ${location} 
+              <span style="font-size: 11px; background: #666; color: white; padding: 2px 6px; border-radius: 10px; margin-left: 5px;">
+                ${groupedData[location].length.toLocaleString()}
+              </span>
+            `;
+            button.onclick = (e) => {
+              selectLocationInModal(location, groupedData[location], e.target);
+            };
+            locationList.appendChild(button);
+          }
+        });
+        
+        const filterInput = document.getElementById('filterLocation');
+        if (filterInput) {
+          filterInput.oninput = function() {
+            const searchTerm = this.value.toLowerCase();
+            const buttons = locationList.querySelectorAll('.user-button');
+            buttons.forEach(button => {
+              const locationName = button.dataset.location.toLowerCase();
+              button.style.display = locationName.includes(searchTerm) ? 'block' : 'none';
+            });
+          };
+        }
+        
+        setTimeout(() => {
+          progressBarContainer.style.display = 'none';
+          loadingStatus.style.display = 'none';
+        }, 1000);
+        
+        const statsDiv = document.createElement('div');
+        statsDiv.style.marginTop = '10px';
+        statsDiv.style.padding = '10px';
+        statsDiv.style.background = '#e8f5e8';
+        statsDiv.style.borderRadius = '4px';
+        statsDiv.style.fontSize = '12px';
+        statsDiv.innerHTML = `
+          <strong>✅ Data berhasil dimuat!</strong><br>
+          • Total data: ${allData.length.toLocaleString()} item<br>
+          • Lokasi: ${locations.length} lokasi<br>
+          • Template: <strong>Barcode | Nama | Qty</strong><br>
+          • Urutan: <strong>created_at (paling lama → terbaru)</strong>
+        `;
+        locationList.parentNode.insertBefore(statsDiv, locationList.nextSibling);
+        
+      } catch (error) {
+        console.error('Error loading data:', error);
+        const locationList = document.getElementById('locationList');
+        if (locationList) {
+          locationList.innerHTML = `
+            <div style="text-align: center; padding: 20px; color: #f44336;">
+              <h4>❌ Gagal memuat data dari Supabase</h4>
+              <p style="font-size: 12px;">${error.message}</p>
+            </div>
+          `;
+        }
+        
+        const progressBarContainer = document.getElementById('progressBarContainer');
+        const loadingStatus = document.getElementById('loadingStatus');
+        if (progressBarContainer) progressBarContainer.style.display = 'none';
+        if (loadingStatus) loadingStatus.style.display = 'none';
+      } finally {
+        isFetchingData = false;
+      }
+    }
+
+    function selectLocationInModal(location, items, target) {
+      const buttons = document.querySelectorAll('#locationList .user-button');
+      buttons.forEach(btn => btn.classList.remove('active'));
+      target.classList.add('active');
+      
+      const infoDiv = document.getElementById('locationDataInfo');
+      const infoContent = document.getElementById('selectedLocationInfo');
+      const countDiv = document.getElementById('locationItemCount');
+      const loadBtn = document.getElementById('loadLocationDataBtn');
+      
+      if (infoDiv && infoContent && countDiv && loadBtn) {
+        infoDiv.style.display = 'block';
+        infoContent.innerHTML = `<strong>📍 ${location}</strong> dipilih`;
+        countDiv.textContent = `${items.length.toLocaleString()} item ditemukan | Template: Barcode, Nama, Qty`;
+        loadBtn.style.display = 'block';
+        
+        // Update nama barang dari produkData jika ada
+        items.forEach(item => {
+          if (item.barcode && produkData[item.barcode]) {
+            item.nama = produkData[item.barcode];
+          }
+        });
+        
+        loadBtn.dataset.location = location;
+        loadBtn.dataset.items = JSON.stringify(items);
+      }
+    }
+
+    // =============== FUNGSI MODAL QTY ===============
+    function showQtyModal(location, items) {
+      const modal = document.getElementById('qtyModal');
+      const locationNameSpan = document.getElementById('modalLocationName');
+      const currentLocationInfo = document.getElementById('currentLocationInfo');
+      const itemsBody = document.getElementById('locationItemsBody');
+      
+      if (!modal || !locationNameSpan || !currentLocationInfo || !itemsBody) return;
+      
+      locationNameSpan.textContent = location;
+      currentLocationInfo.innerHTML = `
+        <div>
+          <strong>📍 ${location}</strong>
+          <div style="font-size: 12px; color: #666;">
+            ${items.length.toLocaleString()} item ditemukan
+          </div>
+        </div>
+      `;
+      
+      itemsBody.innerHTML = '';
+      setFillingQtyStatus(true);
+      
+      if (items.length === 0) {
+        itemsBody.innerHTML = `
+          <tr>
+            <td colspan="4" style="text-align: center; padding: 20px; color: #666;">
+              Tidak ada item di lokasi ini
+            </td>
+          </tr>
+        `;
+      } else {
+        // Batasi tampilan jika terlalu banyak
+        const displayItems = items.slice(0, 500);
+        
+        if (items.length > 500) {
+          const warningRow = document.createElement('tr');
+          warningRow.innerHTML = `
+            <td colspan="4" style="text-align: center; padding: 10px; background: #fff3cd; color: #856404;">
+              <strong>Info:</strong> Menampilkan 500 item pertama dari ${items.length.toLocaleString()} item total
+            </td>
+          `;
+          itemsBody.appendChild(warningRow);
+        }
+        
+        displayItems.forEach((item, index) => {
+          const row = document.createElement('tr');
+          
+          const barcodeBarang = item.barcode || '-';
+          const namaBarang = item.nama || 'N/A';
+          const qtyBarang = item.qty || 0;
+          
+          row.innerHTML = `
+            <td style="text-align: center;">
+              <input type="checkbox" class="item-checkbox" data-index="${index}" />
+            </td>
+            <td style="font-family: monospace; font-weight: bold;">
+              ${barcodeBarang}
+            </td>
+            <td>
+              ${namaBarang}
+              ${qtyBarang ? `<div style="font-size: 11px; color: #888;">Stok: ${qtyBarang}</div>` : ''}
+            </td>
+            <td>
+              <input type="number" 
+                     class="item-qty" 
+                     data-index="${index}"
+                     min="0" 
+                     value="0" 
+                     style="width: 80px; padding: 6px; text-align: center; border: 1px solid #ddd; border-radius: 3px;"
+                     placeholder="Qty" />
+            </td>
+          `;
+          
+          itemsBody.appendChild(row);
+        });
+      }
+      
+      updateSelectedCount();
+      modal.style.display = 'block';
+    }
+
+    function updateSelectedCount() {
+      const checkboxes = document.querySelectorAll('.item-checkbox:checked');
+      const countDiv = document.getElementById('selectedCount');
+      
+      if (countDiv) {
+        if (checkboxes.length > 0) {
+          countDiv.innerHTML = `<strong>${checkboxes.length} item</strong> dipilih untuk disimpan`;
+        } else {
+          countDiv.innerHTML = 'Pilih item dan isi qty untuk menyimpan';
+        }
+      }
+    }
+
+    function selectAllItems() {
+      const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+      const itemCheckboxes = document.querySelectorAll('.item-checkbox');
+      
+      if (!selectAllCheckbox) return;
+      
+      const isChecked = selectAllCheckbox.checked;
+      itemCheckboxes.forEach(checkbox => {
+        checkbox.checked = isChecked;
+      });
+      
+      updateSelectedCount();
+    }
+
+    function saveQtyToDataScan() {
+      const locationName = document.getElementById('modalLocationName').textContent;
+      const user = document.getElementById("userInput").value || "Unknown";
+      
+      const rows = document.querySelectorAll('#locationItemsBody tr');
+      const selectedItems = [];
+      
+      rows.forEach((row, index) => {
+        const checkbox = row.querySelector('.item-checkbox');
+        const qtyInput = row.querySelector('.item-qty');
+        
+        if (checkbox && checkbox.checked) {
+          const qty = parseInt(qtyInput.value) || 0;
+          if (qty > 0) {
+            const cells = row.querySelectorAll('td');
+            
+            const barcodeCell = cells[1];
+            const namaCell = cells[2];
+            
+            const barcode = barcodeCell.textContent.trim();
+            let namaText = namaCell.textContent;
+            namaText = namaText.split('Stok:')[0].trim();
+            
+            selectedItems.push({
+              barcode: barcode,
+              nama: namaText,
+              qty: qty,
+              lokasi: locationName,
+              user: user
+            });
+          }
+        }
+      });
+      
+      if (selectedItems.length === 0) {
+        alert('Pilih minimal satu item dan isi qty yang valid.');
+        return;
+      }
+      
+      let count = 0;
+      selectedItems.forEach(item => {
+        const { barcode, nama, qty, lokasi, user } = item;
+        
+        if (barcode && barcode !== '-' && nama && nama !== 'N/A') {
+          const existingIndex = dataScan.findIndex(scan => 
+            scan.barcode === barcode && 
+            scan.lokasi === lokasi && 
+            scan.user === user
+          );
+          
+          if (existingIndex > -1) {
+            dataScan[existingIndex].qty += qty;
+          } else {
+            dataScan.push({
+              user: user,
+              lokasi: lokasi,
+              barcode: barcode,
+              nama: nama,
+              qty: qty
+            });
+          }
+          count++;
+        }
+      });
+      
+      saveDataToLocalStorage();
+      updateTable();
+      setFillingQtyStatus(false);
+      document.getElementById('qtyModal').style.display = 'none';
+      
+      alert(`✅ ${count} item berhasil ditambahkan ke data scan untuk lokasi ${locationName}.`);
+    }
+
+    // =============== FUNGSI UTILITY ===============
     function setupBeforeUnloadWarning() {
       window.addEventListener('beforeunload', function (e) {
         if (isFillingQty) {
@@ -1261,289 +1809,6 @@
       } catch (error) {
         console.error("Error saving to localStorage:", error);
       }
-    }
-
-    // =============== FUNGSI SUPABASE ===============
-    function initSupabaseClient(url, key) {
-      try {
-        if (!url.startsWith('https://') || !url.includes('.supabase.co')) {
-          throw new Error('URL Supabase tidak valid.');
-        }
-        
-        if (key.length < 10) {
-          throw new Error('API Key tidak valid');
-        }
-        
-        supabaseClient = window.supabase.createClient(url, key);
-        console.log("Supabase initialized successfully");
-        return true;
-      } catch (error) {
-        console.error("Error initializing Supabase:", error);
-        return false;
-      }
-    }
-
-    function showSupabaseConfig() {
-      document.getElementById('supabaseUrl').value = localStorage.getItem("supabaseUrl") || "";
-      document.getElementById('supabaseKey').value = localStorage.getItem("supabaseKey") || "";
-      document.getElementById('supabaseModal').style.display = 'block';
-    }
-
-    function saveSupabaseConfig() {
-      const url = document.getElementById('supabaseUrl').value.trim();
-      const key = document.getElementById('supabaseKey').value.trim();
-      
-      if (!url || !key) {
-        alert("URL dan API Key Supabase harus diisi.");
-        return;
-      }
-      
-      if (!url.startsWith('https://') || !url.includes('.supabase.co')) {
-        alert("URL Supabase harus dalam format: https://your-project.supabase.co");
-        return;
-      }
-      
-      localStorage.setItem("supabaseUrl", url);
-      localStorage.setItem("supabaseKey", key);
-      
-      if (initSupabaseClient(url, key)) {
-        alert("✅ Konfigurasi Supabase berhasil disimpan.");
-        document.getElementById('supabaseModal').style.display = 'none';
-        
-        // Auto-load produk setelah konfigurasi
-        setTimeout(async () => {
-          await loadProdukDataFromSupabase();
-        }, 500);
-      }
-    }
-
-    // =============== FUNGSI SCANNING ===============
-    async function handleBarcodeInput() {
-      const barcodeInput = document.getElementById("barcodeInput");
-      const namaBarangInput = document.getElementById("namaBarangInput");
-      const barcode = barcodeInput.value.trim();
-      
-      if (barcode) {
-        // Reset new item form jika ada
-        hideNewItemForm();
-        
-        // Tampilkan loading state
-        namaBarangInput.value = "🔍 Mencari...";
-        namaBarangInput.style.color = "#666";
-        
-        // Beri jeda kecil untuk user melihat
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
-        // Cari barang
-        const namaBarang = await cariBarangByBarcode(barcode);
-        
-        if (namaBarang) {
-          namaBarangInput.value = namaBarang;
-          namaBarangInput.style.color = "#000";
-          
-          // Auto-focus ke Qty input
-          setTimeout(() => {
-            document.getElementById("qtyInput").focus();
-            document.getElementById("qtyInput").select();
-          }, 100);
-        } else {
-          // Barang tidak ditemukan
-          namaBarangInput.value = "❌ Tidak ditemukan";
-          namaBarangInput.style.color = "#f44336";
-          
-          // Tampilkan form untuk menambahkan barang baru
-          showNewItemForm(barcode);
-        }
-      }
-    }
-
-    // =============== FUNGSI BARANG BARU ===============
-    function showNewItemForm(barcode) {
-      currentScannedBarcode = barcode;
-      
-      const form = document.getElementById("newItemForm");
-      const displayBarcode = document.getElementById("displayBarcode");
-      const namaInput = document.getElementById("newItemNameInput");
-      
-      if (form && displayBarcode && namaInput) {
-        displayBarcode.textContent = barcode;
-        namaInput.value = '';
-        namaInput.focus();
-        form.classList.add("show");
-      }
-    }
-
-    function hideNewItemForm() {
-      const form = document.getElementById("newItemForm");
-      if (form) {
-        form.classList.remove("show");
-      }
-      currentScannedBarcode = '';
-    }
-
-    // =============== SETUP EVENT LISTENERS ===============
-    function setupEventListeners() {
-      // Tabs
-      document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', function() {
-          const tabId = this.dataset.tab;
-          
-          document.querySelectorAll('.tab-content').forEach(tab => {
-            tab.classList.remove('active');
-          });
-          
-          const selectedTab = document.getElementById(tabId);
-          if (selectedTab) {
-            selectedTab.classList.add('active');
-          }
-          
-          document.querySelectorAll('.tab').forEach(tab => {
-            tab.classList.remove('active');
-          });
-          this.classList.add('active');
-        });
-      });
-      
-      // Scan Tab
-      document.getElementById('lockLokasiBtn')?.addEventListener('click', function() {
-        const lokasiInput = document.getElementById("lokasiInput");
-        if (lokasiInput.value.trim() === "") {
-          alert("Harap isi nama lokasi terlebih dahulu!");
-          return;
-        }
-        lokasiInput.disabled = true;
-        lokasiTerkunci = true;
-        alert("✅ Lokasi berhasil dikunci!");
-      });
-      
-      document.getElementById('ubahLokasiBtn')?.addEventListener('click', function() {
-        const lokasiInput = document.getElementById("lokasiInput");
-        lokasiInput.disabled = false;
-        lokasiTerkunci = false;
-        lokasiInput.focus();
-      });
-      
-      document.getElementById('barcodeInput')?.addEventListener('input', handleBarcodeInput);
-      
-      document.getElementById('refreshProdukBtn')?.addEventListener('click', async () => {
-        await loadProdukDataFromSupabase();
-      });
-      
-      // New item form
-      document.getElementById('saveNewItemQuickBtn')?.addEventListener('click', async () => {
-        const namaInput = document.getElementById('newItemNameInput');
-        const namaBarang = namaInput.value.trim();
-        
-        if (!namaBarang) {
-          alert("Harap masukkan nama barang!");
-          namaInput.focus();
-          return;
-        }
-        
-        if (!supabaseClient) {
-          alert("Supabase belum dikonfigurasi. Barang hanya disimpan sementara.");
-          produkData[currentScannedBarcode] = namaBarang;
-          dataBarang[currentScannedBarcode] = namaBarang;
-          document.getElementById("namaBarangInput").value = namaBarang;
-          hideNewItemForm();
-          updateProdukStatus(`✅ ${Object.keys(produkData).length} produk (termasuk sementara)`);
-          return;
-        }
-        
-        try {
-          const { error } = await supabaseClient
-            .from('produk')
-            .insert([{
-              barcode: currentScannedBarcode,
-              nama: namaBarang,
-              created_at: new Date().toISOString()
-            }]);
-          
-          if (error) {
-            console.error("Error menyimpan barang baru:", error);
-            alert(`❌ Gagal menyimpan: ${error.message}`);
-            return;
-          }
-          
-          produkData[currentScannedBarcode] = namaBarang;
-          dataBarang[currentScannedBarcode] = namaBarang;
-          
-          updateProdukStatus(`✅ ${Object.keys(produkData).length} produk (termasuk baru)`);
-          document.getElementById("namaBarangInput").value = namaBarang;
-          
-          try {
-            localStorage.setItem("produkData", JSON.stringify(produkData));
-          } catch (e) {
-            console.error("Error saving to localStorage:", e);
-          }
-          
-          alert(`✅ Barang baru berhasil disimpan ke database!`);
-          hideNewItemForm();
-          
-        } catch (error) {
-          console.error("Error:", error);
-          alert(`❌ Error: ${error.message}`);
-        }
-      });
-      
-      document.getElementById('useTempItemBtn')?.addEventListener('click', () => {
-        const namaInput = document.getElementById('newItemNameInput');
-        const namaBarang = namaInput.value.trim();
-        
-        if (!namaBarang) {
-          alert("Harap masukkan nama barang!");
-          namaInput.focus();
-          return;
-        }
-        
-        produkData[currentScannedBarcode] = namaBarang;
-        dataBarang[currentScannedBarcode] = namaBarang;
-        
-        document.getElementById("namaBarangInput").value = namaBarang;
-        updateProdukStatus(`✅ ${Object.keys(produkData).length} produk (termasuk sementara)`);
-        hideNewItemForm();
-        
-        alert(`📝 Barang "${namaBarang}" digunakan sementara.`);
-      });
-      
-      document.getElementById('cancelNewItemBtn2')?.addEventListener('click', hideNewItemForm);
-      
-      // Tombol utama
-      document.getElementById('scannerButton')?.addEventListener('click', toggleScanner);
-      document.getElementById('tambahDataBtn')?.addEventListener('click', tambahData);
-      document.getElementById('exportDataBtn')?.addEventListener('click', exportToExcel);
-      document.getElementById('showLocationDataBtn')?.addEventListener('click', showLocationDataModal);
-      document.getElementById('saveToSupabaseBtn')?.addEventListener('click', saveToSupabase);
-      document.getElementById('showSupabaseConfigBtn')?.addEventListener('click', showSupabaseConfig);
-      document.getElementById('hapusSemuaDataBtn')?.addEventListener('click', hapusSemuaData);
-      
-      // Modal buttons
-      document.getElementById('saveSupabaseConfigBtn')?.addEventListener('click', saveSupabaseConfig);
-      document.getElementById('cancelSupabaseConfigBtn')?.addEventListener('click', () => {
-        document.getElementById('supabaseModal').style.display = 'none';
-      });
-      
-      // Keyboard shortcuts
-      document.getElementById('barcodeInput')?.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          tambahData();
-        }
-      });
-      
-      document.getElementById('qtyInput')?.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          tambahData();
-        }
-      });
-      
-      document.getElementById('newItemNameInput')?.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          document.getElementById('saveNewItemQuickBtn').click();
-        }
-      });
     }
 
     // =============== FUNGSI UTAMA ===============
@@ -1783,238 +2048,215 @@
       }
     }
 
-    // =============== FUNGSI LOKASI DATA ===============
-    async function showLocationDataModal() {
-      if (!supabaseClient) {
-        alert("Silakan konfigurasi Supabase terlebih dahulu.");
-        showSupabaseConfig();
-        return;
-      }
+    // =============== SETUP EVENT LISTENERS (DIPERBAIKI) ===============
+    function setupEventListeners() {
+      // Tabs
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+          const tabId = this.dataset.tab;
+          
+          document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+          });
+          
+          const selectedTab = document.getElementById(tabId);
+          if (selectedTab) {
+            selectedTab.classList.add('active');
+          }
+          
+          document.querySelectorAll('.tab').forEach(tab => {
+            tab.classList.remove('active');
+          });
+          this.classList.add('active');
+        });
+      });
       
-      if (isFetchingData) {
-        alert("Sedang mengambil data, harap tunggu...");
-        return;
-      }
-      
-      document.getElementById('locationModal').style.display = 'block';
-      await loadAllDataFromSupabase();
-    }
-
-    async function loadAllDataFromSupabase() {
-      if (isFetchingData) return;
-      
-      try {
-        isFetchingData = true;
-        const locationList = document.getElementById('locationList');
-        const progressBarContainer = document.getElementById('progressBarContainer');
-        const progressBar = document.getElementById('progressBar');
-        const loadingStatus = document.getElementById('loadingStatus');
-        const loadingDetails = document.getElementById('loadingDetails');
-        
-        if (!locationList) return;
-        
-        locationList.innerHTML = '<div style="text-align: center; padding: 20px;">Memuat data dari Supabase...</div>';
-        progressBarContainer.style.display = 'block';
-        progressBar.style.width = '0%';
-        progressBar.textContent = '0%';
-        loadingStatus.style.display = 'block';
-        
-        console.log('Memulai pengambilan data dari Supabase...');
-        
-        loadingDetails.textContent = 'Menghitung total data...';
-        
-        // Hitung total data dengan pagination
-        const { count, error: countError } = await supabaseClient
-          .from('stok_barang')
-          .select('*', { count: 'exact', head: true });
-        
-        if (countError) {
-          throw countError;
+      // Scan Tab
+      document.getElementById('lockLokasiBtn')?.addEventListener('click', function() {
+        const lokasiInput = document.getElementById("lokasiInput");
+        if (lokasiInput.value.trim() === "") {
+          alert("Harap isi nama lokasi terlebih dahulu!");
+          return;
         }
+        lokasiInput.disabled = true;
+        lokasiTerkunci = true;
+        alert("✅ Lokasi berhasil dikunci!");
+      });
+      
+      document.getElementById('ubahLokasiBtn')?.addEventListener('click', function() {
+        const lokasiInput = document.getElementById("lokasiInput");
+        lokasiInput.disabled = false;
+        lokasiTerkunci = false;
+        lokasiInput.focus();
+      });
+      
+      document.getElementById('barcodeInput')?.addEventListener('input', handleBarcodeInput);
+      
+      document.getElementById('refreshProdukBtn')?.addEventListener('click', async () => {
+        await loadProdukDataFromSupabase();
+      });
+      
+      // New item form
+      document.getElementById('saveNewItemQuickBtn')?.addEventListener('click', async () => {
+        const namaInput = document.getElementById('newItemNameInput');
+        const namaBarang = namaInput.value.trim();
         
-        const totalData = count || 0;
-        console.log(`Total data di Supabase: ${totalData}`);
-        loadingDetails.textContent = `Total data: ${totalData.toLocaleString()} item`;
-        
-        if (totalData === 0) {
-          locationList.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">Tidak ada data ditemukan di Supabase.</div>';
-          progressBarContainer.style.display = 'none';
-          loadingStatus.style.display = 'none';
-          isFetchingData = false;
+        if (!namaBarang) {
+          alert("Harap masukkan nama barang!");
+          namaInput.focus();
           return;
         }
         
-        // Ambil semua data dengan pagination
-        const pageSize = 1000;
-        const totalPages = Math.ceil(totalData / pageSize);
-        let allData = [];
+        if (!supabaseClient) {
+          alert("Supabase belum dikonfigurasi. Barang hanya disimpan sementara.");
+          produkData[currentScannedBarcode] = namaBarang;
+          dataBarang[currentScannedBarcode] = namaBarang;
+          document.getElementById("namaBarangInput").value = namaBarang;
+          hideNewItemForm();
+          updateProdukStatus(`✅ ${Object.keys(produkData).length} produk (termasuk sementara)`);
+          return;
+        }
         
-        for (let page = 0; page < totalPages; page++) {
-          const from = page * pageSize;
-          const to = Math.min(from + pageSize - 1, totalData - 1);
-          
-          loadingDetails.textContent = `Mengambil data ${(from + 1).toLocaleString()}-${(to + 1).toLocaleString()} dari ${totalData.toLocaleString()}...`;
-          progressBar.style.width = `${((page + 1) / totalPages * 100).toFixed(0)}%`;
-          progressBar.textContent = `${((page + 1) / totalPages * 100).toFixed(0)}%`;
-          
-          console.log(`Mengambil halaman ${page + 1}/${totalPages}...`);
-          
-          const { data, error } = await supabaseClient
-            .from('stok_barang')
-            .select('barcode, nama, lokasi, qty, created_at')
-            .range(from, to)
-            .order('created_at', { ascending: true });
+        try {
+          const { error } = await supabaseClient
+            .from('produk')
+            .insert([{
+              barcode: currentScannedBarcode,
+              nama: namaBarang,
+              created_at: new Date().toISOString()
+            }]);
           
           if (error) {
-            throw error;
+            console.error("Error menyimpan barang baru:", error);
+            alert(`❌ Gagal menyimpan: ${error.message}`);
+            return;
           }
           
-          if (data && data.length > 0) {
-            allData = allData.concat(data);
+          produkData[currentScannedBarcode] = namaBarang;
+          dataBarang[currentScannedBarcode] = namaBarang;
+          
+          updateProdukStatus(`✅ ${Object.keys(produkData).length} produk (termasuk baru)`);
+          document.getElementById("namaBarangInput").value = namaBarang;
+          
+          try {
+            localStorage.setItem("produkData", JSON.stringify(produkData));
+          } catch (e) {
+            console.error("Error saving to localStorage:", e);
           }
           
-          await new Promise(resolve => setTimeout(resolve, 100));
+          alert(`✅ Barang baru berhasil disimpan ke database!`);
+          hideNewItemForm();
+          
+        } catch (error) {
+          console.error("Error:", error);
+          alert(`❌ Error: ${error.message}`);
         }
+      });
+      
+      document.getElementById('useTempItemBtn')?.addEventListener('click', () => {
+        const namaInput = document.getElementById('newItemNameInput');
+        const namaBarang = namaInput.value.trim();
         
-        console.log(`Total data berhasil diambil: ${allData.length} baris`);
-        
-        if (allData.length === 0) {
-          locationList.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">Tidak ada data ditemukan di Supabase.</div>';
-          progressBarContainer.style.display = 'none';
-          loadingStatus.style.display = 'none';
-          isFetchingData = false;
+        if (!namaBarang) {
+          alert("Harap masukkan nama barang!");
+          namaInput.focus();
           return;
         }
         
-        loadingDetails.textContent = 'Mengelompokkan data berdasarkan lokasi...';
-        progressBar.style.width = '100%';
-        progressBar.textContent = '100%';
+        produkData[currentScannedBarcode] = namaBarang;
+        dataBarang[currentScannedBarcode] = namaBarang;
         
-        const groupedData = {};
-        allData.forEach(item => {
-          const location = item.lokasi || 'Tidak Ada Lokasi';
-          if (!groupedData[location]) {
-            groupedData[location] = [];
-          }
-          groupedData[location].push(item);
-        });
+        document.getElementById("namaBarangInput").value = namaBarang;
+        updateProdukStatus(`✅ ${Object.keys(produkData).length} produk (termasuk sementara)`);
+        hideNewItemForm();
         
-        console.log(`Jumlah lokasi: ${Object.keys(groupedData).length}`);
-        
-        locationList.innerHTML = '';
-        const locations = Object.keys(groupedData).sort();
-        
-        const allButton = document.createElement('button');
-        allButton.className = 'user-button';
-        allButton.dataset.location = 'Semua Lokasi';
-        allButton.innerHTML = `
-          📁 Semua Lokasi
-          <span style="font-size: 11px; background: #666; color: white; padding: 2px 6px; border-radius: 10px; margin-left: 5px;">
-            ${allData.length.toLocaleString()}
-          </span>
-        `;
-        allButton.onclick = (e) => {
-          selectLocationInModal('Semua Lokasi', allData, e.target);
-        };
-        locationList.appendChild(allButton);
-        
-        locations.forEach(location => {
-          if (groupedData[location].length > 0) {
-            const button = document.createElement('button');
-            button.className = 'user-button';
-            button.dataset.location = location;
-            button.innerHTML = `
-              📍 ${location} 
-              <span style="font-size: 11px; background: #666; color: white; padding: 2px 6px; border-radius: 10px; margin-left: 5px;">
-                ${groupedData[location].length.toLocaleString()}
-              </span>
-            `;
-            button.onclick = (e) => {
-              selectLocationInModal(location, groupedData[location], e.target);
-            };
-            locationList.appendChild(button);
-          }
-        });
-        
-        const filterInput = document.getElementById('filterLocation');
-        if (filterInput) {
-          filterInput.oninput = function() {
-            const searchTerm = this.value.toLowerCase();
-            const buttons = locationList.querySelectorAll('.user-button');
-            buttons.forEach(button => {
-              const locationName = button.dataset.location.toLowerCase();
-              button.style.display = locationName.includes(searchTerm) ? 'block' : 'none';
-            });
-          };
+        alert(`📝 Barang "${namaBarang}" digunakan sementara.`);
+      });
+      
+      document.getElementById('cancelNewItemBtn2')?.addEventListener('click', hideNewItemForm);
+      
+      // Tombol utama
+      document.getElementById('scannerButton')?.addEventListener('click', toggleScanner);
+      document.getElementById('tambahDataBtn')?.addEventListener('click', tambahData);
+      document.getElementById('exportDataBtn')?.addEventListener('click', exportToExcel);
+      document.getElementById('showLocationDataBtn')?.addEventListener('click', showLocationDataModal);
+      document.getElementById('saveToSupabaseBtn')?.addEventListener('click', saveToSupabase);
+      document.getElementById('showSupabaseConfigBtn')?.addEventListener('click', showSupabaseConfig);
+      document.getElementById('hapusSemuaDataBtn')?.addEventListener('click', hapusSemuaData);
+      
+      // Modal buttons - PERBAIKAN: Tambahkan event listener yang hilang
+      document.getElementById('saveSupabaseConfigBtn')?.addEventListener('click', saveSupabaseConfig);
+      document.getElementById('cancelSupabaseConfigBtn')?.addEventListener('click', () => {
+        document.getElementById('supabaseModal').style.display = 'none';
+      });
+      
+      document.getElementById('loadLocationDataBtn')?.addEventListener('click', loadSelectedLocationData);
+      document.getElementById('closeLocationModalBtn')?.addEventListener('click', () => {
+        document.getElementById('locationModal').style.display = 'none';
+      });
+      
+      document.getElementById('closeQtyModalBtn')?.addEventListener('click', () => {
+        setFillingQtyStatus(false);
+        document.getElementById('qtyModal').style.display = 'none';
+      });
+      
+      document.getElementById('selectAllBtn')?.addEventListener('click', function() {
+        const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        if (selectAllCheckbox) {
+          selectAllCheckbox.checked = !selectAllCheckbox.checked;
+          selectAllItems();
         }
-        
-        setTimeout(() => {
-          progressBarContainer.style.display = 'none';
-          loadingStatus.style.display = 'none';
-        }, 1000);
-        
-        const statsDiv = document.createElement('div');
-        statsDiv.style.marginTop = '10px';
-        statsDiv.style.padding = '10px';
-        statsDiv.style.background = '#e8f5e8';
-        statsDiv.style.borderRadius = '4px';
-        statsDiv.style.fontSize = '12px';
-        statsDiv.innerHTML = `
-          <strong>✅ Data berhasil dimuat!</strong><br>
-          • Total data: ${allData.length.toLocaleString()} item<br>
-          • Lokasi: ${locations.length} lokasi<br>
-          • Template: <strong>Barcode | Nama | Qty</strong><br>
-          • Urutan: <strong>created_at (paling lama → terbaru)</strong>
-        `;
-        locationList.parentNode.insertBefore(statsDiv, locationList.nextSibling);
-        
-      } catch (error) {
-        console.error('Error loading data:', error);
-        const locationList = document.getElementById('locationList');
-        if (locationList) {
-          locationList.innerHTML = `
-            <div style="text-align: center; padding: 20px; color: #f44336;">
-              <h4>❌ Gagal memuat data dari Supabase</h4>
-              <p style="font-size: 12px;">${error.message}</p>
-            </div>
-          `;
+      });
+      
+      document.getElementById('selectAllCheckbox')?.addEventListener('change', selectAllItems);
+      document.getElementById('saveQtyBtn')?.addEventListener('click', saveQtyToDataScan);
+      
+      // Keyboard shortcuts
+      document.getElementById('barcodeInput')?.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          tambahData();
         }
-        
-        const progressBarContainer = document.getElementById('progressBarContainer');
-        const loadingStatus = document.getElementById('loadingStatus');
-        if (progressBarContainer) progressBarContainer.style.display = 'none';
-        if (loadingStatus) loadingStatus.style.display = 'none';
-      } finally {
-        isFetchingData = false;
-      }
+      });
+      
+      document.getElementById('qtyInput')?.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          tambahData();
+        }
+      });
+      
+      document.getElementById('newItemNameInput')?.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          document.getElementById('saveNewItemQuickBtn').click();
+        }
+      });
+      
+      // Global events
+      window.addEventListener('click', function(e) {
+        if (e.target.classList.contains('modal')) {
+          if (e.target.id === 'qtyModal') {
+            setFillingQtyStatus(false);
+          }
+          e.target.style.display = 'none';
+        }
+      });
     }
 
-    function selectLocationInModal(location, items, target) {
-      const buttons = document.querySelectorAll('#locationList .user-button');
-      buttons.forEach(btn => btn.classList.remove('active'));
-      target.classList.add('active');
-      
-      const infoDiv = document.getElementById('locationDataInfo');
-      const infoContent = document.getElementById('selectedLocationInfo');
-      const countDiv = document.getElementById('locationItemCount');
+    // =============== FUNGSI TAMBAHAN UNTUK MODAL LOKASI ===============
+    function loadSelectedLocationData() {
       const loadBtn = document.getElementById('loadLocationDataBtn');
-      
-      if (infoDiv && infoContent && countDiv && loadBtn) {
-        infoDiv.style.display = 'block';
-        infoContent.innerHTML = `<strong>📍 ${location}</strong> dipilih`;
-        countDiv.textContent = `${items.length.toLocaleString()} item ditemukan | Template: Barcode, Nama, Qty`;
-        loadBtn.style.display = 'block';
-        
-        // Update nama barang dari produkData jika ada
-        items.forEach(item => {
-          if (item.barcode && produkData[item.barcode]) {
-            item.nama = produkData[item.barcode];
-          }
-        });
-        
-        loadBtn.dataset.location = location;
-        loadBtn.dataset.items = JSON.stringify(items);
+      if (!loadBtn || !loadBtn.dataset.location) {
+        alert('Pilih lokasi terlebih dahulu.');
+        return;
       }
+      
+      const location = loadBtn.dataset.location;
+      const items = JSON.parse(loadBtn.dataset.items);
+      
+      document.getElementById('locationModal').style.display = 'none';
+      showQtyModal(location, items);
     }
 
     // =============== START APPLICATION ===============
