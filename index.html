@@ -322,6 +322,37 @@
       color: #856404;
     }
     
+    /* Info barcode input */
+    .barcode-input-info {
+      font-size: 12px;
+      color: #666;
+      margin-top: 5px;
+      padding: 5px;
+      background: #f5f5f5;
+      border-radius: 4px;
+    }
+    
+    /* Input mode indicator */
+    .input-mode-indicator {
+      font-size: 12px;
+      color: #666;
+      margin: 5px 0;
+      padding: 5px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      display: none;
+    }
+    .input-mode-indicator.scanner {
+      background: #e8f5e8;
+      color: #2e7d32;
+      border-left: 3px solid #4CAF50;
+    }
+    .input-mode-indicator.manual {
+      background: #f5f5f5;
+      color: #666;
+      border-left: 3px solid #9e9e9e;
+    }
+    
     @media (max-width: 768px) {
       body { padding: 10px; }
       .button-group { flex-direction: column; }
@@ -374,8 +405,9 @@
         </div>
         <div style="font-size: 12px; color: #666; margin-top: 8px;">
           • <strong>Barcode</strong>: Kode unik barang<br>
-          • <strong>Nama</strong>: Nama barang<br>
-          • <strong>Qty</strong>: Jumlah stok (akan diisi manual)
+          • <strong>Nama</strong>: Nama barang (diambil dari tabel produk)<br>
+          • <strong>Qty</strong>: Jumlah stok (akan diisi manual)<br>
+          • <strong>Urutan</strong>: ID terkecil → terbesar
         </div>
       </div>
       
@@ -427,6 +459,10 @@
           <span class="template-item" style="border-color: #4CAF50;">Barcode</span> | 
           <span class="template-item" style="border-color: #4CAF50;">Nama</span> | 
           <span class="template-item" style="border-color: #4CAF50;">Qty</span>
+        </div>
+        <div style="font-size: 12px; color: #666; margin-top: 8px;">
+          • Urutan: <strong>ID terkecil → terbesar</strong><br>
+          • Nama barang diambil dari tabel produk
         </div>
       </div>
       
@@ -578,7 +614,26 @@
     <label>📷 Scan Barcode:</label>
     <input type="text" id="barcodeInput" placeholder="Scan barcode..." autofocus />
     
-    <button id="scannerButton">📷 Aktifkan Kamera</button>
+    <!-- Indikator mode input -->
+    <div id="inputModeIndicator" class="input-mode-indicator manual">
+      <span id="inputModeText">Mode: Manual (Tekan Enter untuk mencari)</span>
+      <span id="inputLength" style="float: right;">0 karakter</span>
+    </div>
+    
+    <div class="barcode-input-info">
+      ⏎ <strong>Enter</strong> untuk mencari | 
+      ⌃⏎ <strong>Ctrl+Enter</strong> untuk tambah barang baru | 
+      ⎋ <strong>Esc</strong> untuk reset
+    </div>
+    
+    <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+      <button id="manualSearchBtn" style="flex: 1; background-color: #2196F3; color: white;">
+        🔍 Cari Manual
+      </button>
+      <button id="scannerButton" style="flex: 1;">
+        📷 Aktifkan Kamera
+      </button>
+    </div>
     
     <div id="cameraStatus" class="camera-status inactive">Kamera tidak aktif</div>
     <div id="reader"></div>
@@ -702,6 +757,9 @@
     let produkLoadedTime = null;
     let currentScannedBarcode = '';
     let isFetchingAllProduk = false;
+    let barcodeTimeout = null; // Untuk debounce
+    let lastInputTime = 0; // Untuk deteksi kecepatan input
+    let inputEvents = []; // Untuk melacak event input
 
     // =============== FUNGSI INISIALISASI ===============
     function initApp() {
@@ -841,7 +899,7 @@
             .select(`${barcodeField}, ${namaField}`)
             .range(from, to)
             .order('id', { ascending: true }); // Ganti 'id' dengan kolom yang sesuai
-          
+        
           if (error) {
             console.error(`Error mengambil halaman ${page + 1}:`, error);
             updateProdukStatus(`❌ Error: ${error.message}`, "error");
@@ -1165,23 +1223,86 @@
       produkLoadedTime = new Date().toISOString();
     }
 
-    // =============== FUNGSI SCANNING ===============
+    // =============== FUNGSI UPDATE INPUT MODE INDICATOR ===============
+    function updateInputModeIndicator(value) {
+      const indicator = document.getElementById('inputModeIndicator');
+      const modeText = document.getElementById('inputModeText');
+      const lengthText = document.getElementById('inputLength');
+      
+      if (!indicator || !modeText || !lengthText) return;
+      
+      const length = value.length;
+      lengthText.textContent = `${length} karakter`;
+      
+      // Tentukan mode berdasarkan panjang dan karakteristik
+      let mode = 'Manual';
+      let modeClass = 'manual';
+      
+      if (length === 0) {
+        indicator.style.display = 'none';
+        return;
+      }
+      
+      indicator.style.display = 'block';
+      
+      const isNumeric = /^\d+$/.test(value);
+      const isStandardBarcode = length === 8 || length === 12 || length === 13 || length === 14;
+      const isVeryLong = length >= 15;
+      
+      // Hitung kecepatan mengetik
+      let typingSpeed = Infinity;
+      if (inputEvents.length >= 3) {
+        const firstEvent = inputEvents[0];
+        const lastEvent = inputEvents[inputEvents.length - 1];
+        const timeDiff = lastEvent.time - firstEvent.time;
+        const charDiff = lastEvent.valueLength - firstEvent.valueLength;
+        if (timeDiff > 0 && charDiff > 0) {
+          typingSpeed = timeDiff / charDiff;
+        }
+      }
+      
+      const isFastTyping = typingSpeed > 0 && typingSpeed < 50; // Kurang dari 50ms per karakter
+      
+      // Deteksi scanner
+      if ((isNumeric && isStandardBarcode && isFastTyping) || 
+          (isVeryLong && isFastTyping)) {
+        mode = 'Scanner terdeteksi';
+        modeClass = 'scanner';
+      } else if (isNumeric && isStandardBarcode) {
+        mode = 'Barcode standar (Enter untuk cari)';
+        modeClass = 'manual';
+      } else if (isVeryLong) {
+        mode = 'Barcode panjang (Enter untuk cari)';
+        modeClass = 'manual';
+      } else {
+        mode = 'Manual (Enter untuk cari)';
+        modeClass = 'manual';
+      }
+      
+      modeText.textContent = mode;
+      indicator.className = `input-mode-indicator ${modeClass}`;
+    }
+
+    // =============== FUNGSI SCANNING (DIPERBAIKI) ===============
     async function handleBarcodeInput() {
       const barcodeInput = document.getElementById("barcodeInput");
       const namaBarangInput = document.getElementById("namaBarangInput");
       const barcode = barcodeInput.value.trim();
       
-      if (barcode) {
-        // Reset new item form jika ada
+      if (!barcode) {
+        namaBarangInput.value = "";
         hideNewItemForm();
-        
-        // Tampilkan loading state
-        namaBarangInput.value = "🔍 Mencari...";
-        namaBarangInput.style.color = "#666";
-        
-        // Beri jeda kecil untuk user melihat
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
+        return;
+      }
+      
+      // Reset new item form jika ada
+      hideNewItemForm();
+      
+      // Tampilkan loading state
+      namaBarangInput.value = "🔍 Mencari...";
+      namaBarangInput.style.color = "#666";
+      
+      try {
         // Cari barang
         const namaBarang = await cariBarangByBarcode(barcode);
         
@@ -1195,19 +1316,35 @@
             document.getElementById("qtyInput").select();
           }, 100);
         } else {
-          // Barang tidak ditemukan
+          // Barang tidak ditemukan - TIDAK langsung tampilkan form
           namaBarangInput.value = "❌ Tidak ditemukan";
           namaBarangInput.style.color = "#f44336";
           
-          // Tampilkan form untuk menambahkan barang baru
-          showNewItemForm(barcode);
+          // Fokus kembali ke barcode input untuk koreksi
+          setTimeout(() => {
+            barcodeInput.focus();
+            barcodeInput.select();
+          }, 100);
         }
+      } catch (error) {
+        console.error("Error mencari barang:", error);
+        namaBarangInput.value = "❌ Error mencari";
+        namaBarangInput.style.color = "#f44336";
       }
     }
 
-    // =============== FUNGSI BARANG BARU ===============
+    // =============== FUNGSI BARANG BARU (DIPERBAIKI) ===============
     function showNewItemForm(barcode) {
       currentScannedBarcode = barcode;
+      
+      // Konfirmasi sebelum tampilkan form
+      if (!confirm(`Barcode "${barcode}" tidak ditemukan. Tambah barang baru?`)) {
+        // Reset form
+        document.getElementById("barcodeInput").value = "";
+        document.getElementById("namaBarangInput").value = "";
+        document.getElementById("barcodeInput").focus();
+        return;
+      }
       
       const form = document.getElementById("newItemForm");
       const displayBarcode = document.getElementById("displayBarcode");
@@ -1323,7 +1460,7 @@
         
         loadingDetails.textContent = 'Menghitung total data...';
         
-        // Hitung total data dengan pagination
+        // Hitung total data
         const { count, error: countError } = await supabaseClient
           .from('stok_barang')
           .select('*', { count: 'exact', head: true });
@@ -1344,10 +1481,18 @@
           return;
         }
         
-        // Ambil semua data dengan pagination
+        // **PERBAIKAN: Ambil data dengan urutan ID ASC (terkecil ke terbesar)**
+        loadingDetails.textContent = 'Mengambil data dari Supabase (urut ID terkecil ke terbesar)...';
+        progressBar.style.width = '50%';
+        progressBar.textContent = '50%';
+        
+        console.log('Mengambil semua data dengan urutan ID ASC...');
+        
+        let allData = [];
+        
+        // Gunakan pagination untuk menjaga performa
         const pageSize = 1000;
         const totalPages = Math.ceil(totalData / pageSize);
-        let allData = [];
         
         for (let page = 0; page < totalPages; page++) {
           const from = page * pageSize;
@@ -1359,13 +1504,15 @@
           
           console.log(`Mengambil halaman ${page + 1}/${totalPages}...`);
           
+          // **PERBAIKAN PENTING: ORDER BY id ASC (terkecil ke terbesar)**
           const { data, error } = await supabaseClient
             .from('stok_barang')
-            .select('barcode, nama, lokasi, qty, created_at')
-            .range(from, to)
-            .order('created_at', { ascending: true });
+            .select('barcode, nama, lokasi, qty, created_at, id')
+            .order('id', { ascending: true }) // PERUBAHAN KUNCI: id ASC untuk terkecil ke terbesar
+            .range(from, to);
           
           if (error) {
+            console.error('Error mengambil data:', error);
             throw error;
           }
           
@@ -1386,24 +1533,46 @@
           return;
         }
         
+        // **VERIFIKASI: Cek urutan ID dan data**
+        console.log('Verifikasi urutan ID dan data:');
+        if (allData.length >= 5) {
+          console.log('5 data pertama (harus ID terkecil):');
+          allData.slice(0, 5).forEach((item, i) => {
+            console.log(`${i+1}. ID: ${item.id}, Barcode: ${item.barcode}, Nama: ${item.nama}, Lokasi: ${item.lokasi}`);
+          });
+        }
+        
         loadingDetails.textContent = 'Mengelompokkan data berdasarkan lokasi...';
         progressBar.style.width = '100%';
         progressBar.textContent = '100%';
         
+        // **PERBAIKAN: Kelompokkan data TANPA mengubah urutan asli**
         const groupedData = {};
-        allData.forEach(item => {
+        const locationOrderMap = new Map(); // Untuk melacak urutan lokasi pertama muncul
+        
+        allData.forEach((item, index) => {
           const location = item.lokasi || 'Tidak Ada Lokasi';
           if (!groupedData[location]) {
             groupedData[location] = [];
+            // Simpan index pertama kali lokasi muncul (untuk urutan tampilan)
+            locationOrderMap.set(location, index);
           }
           groupedData[location].push(item);
         });
         
         console.log(`Jumlah lokasi: ${Object.keys(groupedData).length}`);
+        console.log('Lokasi yang ditemukan:', Object.keys(groupedData));
         
         locationList.innerHTML = '';
-        const locations = Object.keys(groupedData).sort();
         
+        // **PERBAIKAN: Urutkan lokasi berdasarkan kemunculan pertama di data terurut (ID ASC)**
+        const locations = Array.from(locationOrderMap.entries())
+          .sort((a, b) => a[1] - b[1]) // Urutkan berdasarkan index kemunculan pertama
+          .map(entry => entry[0]);
+        
+        console.log('Urutan lokasi berdasarkan kemunculan pertama:', locations);
+        
+        // Tombol "Semua Lokasi" dengan data terurut berdasarkan ID
         const allButton = document.createElement('button');
         allButton.className = 'user-button';
         allButton.dataset.location = 'Semua Lokasi';
@@ -1418,24 +1587,50 @@
         };
         locationList.appendChild(allButton);
         
+        // **PERBAIKAN: Tampilkan lokasi sesuai urutan kemunculan pertama dalam data terurut ID ASC**
         locations.forEach(location => {
           if (groupedData[location].length > 0) {
             const button = document.createElement('button');
             button.className = 'user-button';
             button.dataset.location = location;
+            
+            // Info ID pertama dan terakhir untuk verifikasi
+            const firstItem = groupedData[location][0];
+            const lastItem = groupedData[location][groupedData[location].length - 1];
+            
             button.innerHTML = `
               📍 ${location} 
               <span style="font-size: 11px; background: #666; color: white; padding: 2px 6px; border-radius: 10px; margin-left: 5px;">
                 ${groupedData[location].length.toLocaleString()}
               </span>
             `;
+            
             button.onclick = (e) => {
+              // **PERBAIKAN: Verifikasi urutan data sebelum dikirim ke modal**
+              console.log(`Mengirim data untuk lokasi "${location}":`);
+              console.log(`- Jumlah item: ${groupedData[location].length}`);
+              console.log(`- ID pertama (terkecil): ${firstItem?.id || 'N/A'}`);
+              console.log(`- ID terakhir (terbesar): ${lastItem?.id || 'N/A'}`);
+              console.log(`- Urutan: ID ${firstItem?.id || 'N/A'} → ${lastItem?.id || 'N/A'}`);
+              
+              // **PERBAIKAN: Pastikan data sudah ada nama dari join produk**
+              groupedData[location].forEach(item => {
+                if (!item.nama || item.nama === 'Nama tidak ditemukan') {
+                  // Coba cari nama dari cache produkData
+                  if (item.barcode && produkData[item.barcode]) {
+                    item.nama = produkData[item.barcode];
+                  }
+                }
+              });
+              
+              // Kirim data lokasi DENGAN URUTAN ID ASC
               selectLocationInModal(location, groupedData[location], e.target);
             };
             locationList.appendChild(button);
           }
         });
         
+        // Filter lokasi
         const filterInput = document.getElementById('filterLocation');
         if (filterInput) {
           filterInput.oninput = function() {
@@ -1453,29 +1648,45 @@
           loadingStatus.style.display = 'none';
         }, 1000);
         
+        // Tampilkan informasi lengkap
         const statsDiv = document.createElement('div');
         statsDiv.style.marginTop = '10px';
         statsDiv.style.padding = '10px';
         statsDiv.style.background = '#e8f5e8';
         statsDiv.style.borderRadius = '4px';
         statsDiv.style.fontSize = '12px';
+        
+        // Info urutan dan template
+        const firstItem = allData[0];
+        const lastItem = allData[allData.length - 1];
+        
         statsDiv.innerHTML = `
           <strong>✅ Data berhasil dimuat!</strong><br>
           • Total data: ${allData.length.toLocaleString()} item<br>
           • Lokasi: ${locations.length} lokasi<br>
+          • Urutan: <strong>ID ASC (${firstItem?.id || 'N/A'} → ${lastItem?.id || 'N/A'})</strong><br>
           • Template: <strong>Barcode | Nama | Qty</strong><br>
-          • Urutan: <strong>created_at (paling lama → terbaru)</strong>
+          <br>
+          <strong>Verifikasi:</strong><br>
+          • Data akan ditampilkan: <strong>TERKECIL → TERBESAR</strong><br>
+          • Kolom: <strong>Barcode, Nama, Qty</strong>
         `;
         locationList.parentNode.insertBefore(statsDiv, locationList.nextSibling);
         
       } catch (error) {
         console.error('Error loading data:', error);
+        
         const locationList = document.getElementById('locationList');
         if (locationList) {
           locationList.innerHTML = `
             <div style="text-align: center; padding: 20px; color: #f44336;">
               <h4>❌ Gagal memuat data dari Supabase</h4>
               <p style="font-size: 12px;">${error.message}</p>
+              <p style="font-size: 11px; margin-top: 10px;">
+                Pastikan:<br>
+                1. Tabel 'stok_barang' memiliki field 'id'<br>
+                2. Koneksi internet stabil
+              </p>
             </div>
           `;
         }
@@ -1502,7 +1713,16 @@
       if (infoDiv && infoContent && countDiv && loadBtn) {
         infoDiv.style.display = 'block';
         infoContent.innerHTML = `<strong>📍 ${location}</strong> dipilih`;
-        countDiv.textContent = `${items.length.toLocaleString()} item ditemukan | Template: Barcode, Nama, Qty`;
+        
+        // **PERBAIKAN: Tampilkan informasi ID range**
+        let idRangeText = '';
+        if (items.length > 0) {
+          const firstId = items[0].id;
+          const lastId = items[items.length - 1].id;
+          idRangeText = ` | ID: ${firstId} → ${lastId}`;
+        }
+        
+        countDiv.textContent = `${items.length.toLocaleString()} item ditemukan | Urutan: ID ASC (terkecil → terbesar)${idRangeText}`;
         loadBtn.style.display = 'block';
         
         // Update nama barang dari produkData jika ada
@@ -1514,10 +1734,15 @@
         
         loadBtn.dataset.location = location;
         loadBtn.dataset.items = JSON.stringify(items);
+        
+        // **DEBUG: Log urutan ID**
+        console.log(`Data untuk lokasi "${location}":`);
+        console.log(`- ID range: ${items[0]?.id || 'N/A'} → ${items[items.length - 1]?.id || 'N/A'}`);
+        console.log(`- Jumlah item: ${items.length}`);
       }
     }
 
-    // =============== FUNGSI MODAL QTY ===============
+    // =============== FUNGSI MODAL QTY (DIPERBAIKI) ===============
     function showQtyModal(location, items) {
       const modal = document.getElementById('qtyModal');
       const locationNameSpan = document.getElementById('modalLocationName');
@@ -1527,11 +1752,23 @@
       if (!modal || !locationNameSpan || !currentLocationInfo || !itemsBody) return;
       
       locationNameSpan.textContent = location;
+      
+      // **PERBAIKAN: Tampilkan info ID range**
+      let idInfo = '';
+      if (items.length > 0) {
+        const firstId = items[0].id;
+        const lastId = items[items.length - 1].id;
+        idInfo = ` | ID: ${firstId} → ${lastId}`;
+      }
+      
       currentLocationInfo.innerHTML = `
         <div>
           <strong>📍 ${location}</strong>
           <div style="font-size: 12px; color: #666;">
-            ${items.length.toLocaleString()} item ditemukan
+            ${items.length.toLocaleString()} item ditemukan ${idInfo}
+          </div>
+          <div style="font-size: 11px; color: #888; margin-top: 5px;">
+            Urutan: ID ${items[0]?.id || 'N/A'} → ${items[items.length-1]?.id || 'N/A'} (terkecil → terbesar)
           </div>
         </div>
       `;
@@ -1548,14 +1785,15 @@
           </tr>
         `;
       } else {
-        // Batasi tampilan jika terlalu banyak
+        // **PERBAIKAN: Batasi tampilan dan tampilkan urutan ID**
         const displayItems = items.slice(0, 500);
         
         if (items.length > 500) {
           const warningRow = document.createElement('tr');
           warningRow.innerHTML = `
             <td colspan="4" style="text-align: center; padding: 10px; background: #fff3cd; color: #856404;">
-              <strong>Info:</strong> Menampilkan 500 item pertama dari ${items.length.toLocaleString()} item total
+              <strong>Info:</strong> Menampilkan 500 item pertama dari ${items.length.toLocaleString()} item total<br>
+              <small>Urutan: ID ${items[0]?.id || 'N/A'} → ${items[items.length-1]?.id || 'N/A'} (terkecil → terbesar)</small>
             </td>
           `;
           itemsBody.appendChild(warningRow);
@@ -1567,6 +1805,7 @@
           const barcodeBarang = item.barcode || '-';
           const namaBarang = item.nama || 'N/A';
           const qtyBarang = item.qty || 0;
+          const itemId = item.id || index;
           
           row.innerHTML = `
             <td style="text-align: center;">
@@ -1574,6 +1813,7 @@
             </td>
             <td style="font-family: monospace; font-weight: bold;">
               ${barcodeBarang}
+              <div style="font-size: 11px; color: #888;">ID: ${itemId}</div>
             </td>
             <td>
               ${namaBarang}
@@ -1644,7 +1884,11 @@
             const barcodeCell = cells[1];
             const namaCell = cells[2];
             
-            const barcode = barcodeCell.textContent.trim();
+            // Ambil barcode tanpa ID
+            const barcode = barcodeCell.querySelector('div') ? 
+              barcodeCell.textContent.replace(barcodeCell.querySelector('div').textContent, '').trim() : 
+              barcodeCell.textContent.trim();
+            
             let namaText = namaCell.textContent;
             namaText = namaText.split('Stok:')[0].trim();
             
@@ -2048,7 +2292,7 @@
       }
     }
 
-    // =============== SETUP EVENT LISTENERS (DIPERBAIKI) ===============
+    // =============== SETUP EVENT LISTENERS (DIPERBAIKI TANPA AUTO-TRIGGER) ===============
     function setupEventListeners() {
       // Tabs
       document.querySelectorAll('.tab').forEach(tab => {
@@ -2090,7 +2334,128 @@
         lokasiInput.focus();
       });
       
-      document.getElementById('barcodeInput')?.addEventListener('input', handleBarcodeInput);
+      // =============== PERBAIKAN PENTING: EVENT LISTENER BARCODE INPUT ===============
+      // Event listener untuk keyboard shortcuts
+      document.getElementById('barcodeInput')?.addEventListener('keydown', function(e) {
+        const value = this.value.trim();
+        const now = Date.now();
+        
+        // Catat event input untuk deteksi kecepatan
+        inputEvents.push({
+          time: now,
+          key: e.key,
+          valueLength: value.length
+        });
+        
+        // Simpan hanya 10 event terakhir
+        if (inputEvents.length > 10) {
+          inputEvents.shift();
+        }
+        
+        // Update indikator
+        updateInputModeIndicator(value);
+        
+        // Enter untuk mencari barang
+        if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          handleBarcodeInput();
+          return;
+        }
+        
+        // Ctrl+Enter untuk tambah barang baru
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          const barcode = value;
+          if (barcode) {
+            showNewItemForm(barcode);
+          }
+          return;
+        }
+        
+        // Esc untuk reset form
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          hideNewItemForm();
+          this.value = "";
+          document.getElementById("namaBarangInput").value = "";
+          document.getElementById("inputModeIndicator").style.display = 'none';
+          this.focus();
+          return;
+        }
+      });
+      
+      // Event listener untuk input - TANPA AUTO-TRIGGER
+      document.getElementById('barcodeInput')?.addEventListener('input', function() {
+        clearTimeout(barcodeTimeout);
+        
+        const value = this.value.trim();
+        
+        // Reset form jika kosong
+        if (value.length === 0) {
+          hideNewItemForm();
+          document.getElementById("namaBarangInput").value = "";
+          document.getElementById("inputModeIndicator").style.display = 'none';
+          return;
+        }
+        
+        // Update indikator mode
+        updateInputModeIndicator(value);
+        
+        // =============== SOLUSI TANPA AUTO-TRIGGER ===============
+        // HANYA trigger otomatis untuk barcode SANGAT PANJANG (15+ karakter)
+        // Ini untuk scanner yang menghasilkan barcode sangat panjang
+        if (value.length >= 18) { // Hanya untuk barcode sangat panjang
+          barcodeTimeout = setTimeout(() => {
+            // Double check: apakah value masih sama?
+            const currentValue = document.getElementById('barcodeInput').value.trim();
+            if (currentValue === value && currentValue.length >= 18) {
+              console.log('Auto-trigger untuk barcode panjang:', currentValue.length, 'karakter');
+              handleBarcodeInput();
+            }
+          }, 300); // Delay 300ms untuk memastikan input selesai
+        }
+        // Untuk barcode 12-17 digit, user harus tekan Enter
+        // Tidak ada auto-trigger untuk menghindari gangguan
+      });
+      
+      // Event listener untuk paste (scanner sering menggunakan paste)
+      document.getElementById('barcodeInput')?.addEventListener('paste', function(e) {
+        const pastedText = (e.clipboardData || window.clipboardData).getData('text');
+        
+        // Jika paste text panjang, kemungkinan dari scanner
+        if (pastedText.length >= 12) {
+          // Tunggu sebentar untuk memastikan value sudah terpaste
+          setTimeout(() => {
+            const currentValue = document.getElementById('barcodeInput').value.trim();
+            if (currentValue.length >= 12) {
+              console.log('Auto-trigger dari paste:', currentValue.length, 'karakter');
+              handleBarcodeInput();
+            }
+          }, 100);
+        }
+      });
+      
+      // Tombol manual search
+      document.getElementById('manualSearchBtn')?.addEventListener('click', function() {
+        const barcodeInput = document.getElementById("barcodeInput");
+        const barcode = barcodeInput.value.trim();
+        
+        if (!barcode) {
+          alert("Masukkan barcode terlebih dahulu!");
+          barcodeInput.focus();
+          return;
+        }
+        
+        // Cek apakah barang sudah ditemukan
+        const namaBarangInput = document.getElementById("namaBarangInput");
+        if (namaBarangInput.value && namaBarangInput.value !== "❌ Tidak ditemukan") {
+          alert("Barang sudah ditemukan!");
+          return;
+        }
+        
+        // Tampilkan form barang baru
+        showNewItemForm(barcode);
+      });
       
       document.getElementById('refreshProdukBtn')?.addEventListener('click', async () => {
         await loadProdukDataFromSupabase();
@@ -2184,7 +2549,7 @@
       document.getElementById('showSupabaseConfigBtn')?.addEventListener('click', showSupabaseConfig);
       document.getElementById('hapusSemuaDataBtn')?.addEventListener('click', hapusSemuaData);
       
-      // Modal buttons - PERBAIKAN: Tambahkan event listener yang hilang
+      // Modal buttons
       document.getElementById('saveSupabaseConfigBtn')?.addEventListener('click', saveSupabaseConfig);
       document.getElementById('cancelSupabaseConfigBtn')?.addEventListener('click', () => {
         document.getElementById('supabaseModal').style.display = 'none';
@@ -2211,14 +2576,7 @@
       document.getElementById('selectAllCheckbox')?.addEventListener('change', selectAllItems);
       document.getElementById('saveQtyBtn')?.addEventListener('click', saveQtyToDataScan);
       
-      // Keyboard shortcuts
-      document.getElementById('barcodeInput')?.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          tambahData();
-        }
-      });
-      
+      // Keyboard shortcuts untuk Qty input
       document.getElementById('qtyInput')?.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
           e.preventDefault();
