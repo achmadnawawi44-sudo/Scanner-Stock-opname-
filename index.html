@@ -1742,7 +1742,7 @@
       }
     }
 
-    // =============== FUNGSI MODAL QTY (DIPERBAIKI) ===============
+    // =============== FUNGSI MODAL QTY (DIPERBAIKI - MASALAH UTAMA DIPERBAIKI) ===============
     function showQtyModal(location, items) {
       const modal = document.getElementById('qtyModal');
       const locationNameSpan = document.getElementById('modalLocationName');
@@ -1809,7 +1809,7 @@
           
           row.innerHTML = `
             <td style="text-align: center;">
-              <input type="checkbox" class="item-checkbox" data-index="${index}" />
+              <input type="checkbox" class="item-checkbox" data-index="${index}" checked />
             </td>
             <td style="font-family: monospace; font-weight: bold;">
               ${barcodeBarang}
@@ -1838,13 +1838,38 @@
       modal.style.display = 'block';
     }
 
+    // =============== FUNGSI UTAMA YANG DIPERBAIKI - SEMUA DATA QTY MASUK ===============
     function updateSelectedCount() {
       const checkboxes = document.querySelectorAll('.item-checkbox:checked');
       const countDiv = document.getElementById('selectedCount');
       
       if (countDiv) {
         if (checkboxes.length > 0) {
-          countDiv.innerHTML = `<strong>${checkboxes.length} item</strong> dipilih untuk disimpan`;
+          let totalQty = 0;
+          let qtyZeroCount = 0;
+          let qtyPositiveCount = 0;
+          
+          checkboxes.forEach(checkbox => {
+            const row = checkbox.closest('tr');
+            const qtyInput = row.querySelector('.item-qty');
+            const qty = parseInt(qtyInput.value) || 0;
+            totalQty += qty;
+            if (qty === 0) {
+              qtyZeroCount++;
+            } else {
+              qtyPositiveCount++;
+            }
+          });
+          
+          let message = `<strong>${checkboxes.length} item</strong> dipilih`;
+          if (qtyPositiveCount > 0) {
+            message += ` | ${qtyPositiveCount} item dengan qty > 0 (total: ${totalQty})`;
+          }
+          if (qtyZeroCount > 0) {
+            message += ` | ${qtyZeroCount} item dengan qty = 0`;
+          }
+          
+          countDiv.innerHTML = message;
         } else {
           countDiv.innerHTML = 'Pilih item dan isi qty untuk menyimpan';
         }
@@ -1854,92 +1879,155 @@
     function selectAllItems() {
       const selectAllCheckbox = document.getElementById('selectAllCheckbox');
       const itemCheckboxes = document.querySelectorAll('.item-checkbox');
+      const itemQtyInputs = document.querySelectorAll('.item-qty');
       
       if (!selectAllCheckbox) return;
       
       const isChecked = selectAllCheckbox.checked;
+      
+      // Update semua checkbox
       itemCheckboxes.forEach(checkbox => {
         checkbox.checked = isChecked;
       });
       
+      // **PERBAIKAN: Pastikan semua input qty memiliki nilai default 0**
+      if (isChecked) {
+        itemQtyInputs.forEach(input => {
+          if (input.value === '' || isNaN(parseInt(input.value))) {
+            input.value = 0;
+          }
+        });
+      }
+      
       updateSelectedCount();
     }
 
+    // =============== FUNGSI CRITICAL FIX - SIMPAN SEMUA DATA TERPILIH ===============
     function saveQtyToDataScan() {
       const locationName = document.getElementById('modalLocationName').textContent;
       const user = document.getElementById("userInput").value || "Unknown";
       
       const rows = document.querySelectorAll('#locationItemsBody tr');
       const selectedItems = [];
+      let totalItems = 0;
+      let itemsWithZeroQty = 0;
+      let itemsWithPositiveQty = 0;
       
       rows.forEach((row, index) => {
         const checkbox = row.querySelector('.item-checkbox');
         const qtyInput = row.querySelector('.item-qty');
         
+        // **PERBAIKAN PENTING: SELALU MASUKKAN DATA JIKA CHECKBOX TERPILIH**
         if (checkbox && checkbox.checked) {
-          const qty = parseInt(qtyInput.value) || 0;
-          if (qty > 0) {
-            const cells = row.querySelectorAll('td');
-            
-            const barcodeCell = cells[1];
-            const namaCell = cells[2];
-            
-            // Ambil barcode tanpa ID
-            const barcode = barcodeCell.querySelector('div') ? 
-              barcodeCell.textContent.replace(barcodeCell.querySelector('div').textContent, '').trim() : 
-              barcodeCell.textContent.trim();
-            
-            let namaText = namaCell.textContent;
-            namaText = namaText.split('Stok:')[0].trim();
-            
+          const qty = parseInt(qtyInput.value) || 0; // Terima qty 0 juga
+          
+          const cells = row.querySelectorAll('td');
+          
+          const barcodeCell = cells[1];
+          const namaCell = cells[2];
+          
+          // Ambil barcode tanpa ID
+          const barcode = barcodeCell.querySelector('div') ? 
+            barcodeCell.textContent.replace(barcodeCell.querySelector('div').textContent, '').trim() : 
+            barcodeCell.textContent.trim();
+          
+          let namaText = namaCell.textContent;
+          namaText = namaText.split('Stok:')[0].trim();
+          
+          if (barcode && barcode !== '-' && namaText && namaText !== 'N/A') {
             selectedItems.push({
               barcode: barcode,
               nama: namaText,
-              qty: qty,
+              qty: qty, // **INI YANG DIPERBAIKI: SIMPAN JUGA QTY 0**
               lokasi: locationName,
               user: user
             });
+            
+            totalItems++;
+            if (qty === 0) {
+              itemsWithZeroQty++;
+            } else {
+              itemsWithPositiveQty++;
+            }
           }
         }
       });
       
-      if (selectedItems.length === 0) {
-        alert('Pilih minimal satu item dan isi qty yang valid.');
+      if (totalItems === 0) {
+        alert('Tidak ada item yang dipilih. Pilih minimal satu item.');
         return;
       }
       
-      let count = 0;
+      // **PERBAIKAN: Konfirmasi sebelum menyimpan**
+      let confirmationMessage = `Simpan ${totalItems} item ke data scan?\n\n`;
+      if (itemsWithPositiveQty > 0) {
+        confirmationMessage += `• ${itemsWithPositiveQty} item dengan qty > 0\n`;
+      }
+      if (itemsWithZeroQty > 0) {
+        confirmationMessage += `• ${itemsWithZeroQty} item dengan qty = 0\n`;
+      }
+      confirmationMessage += `\nLokasi: ${locationName}`;
+      
+      if (!confirm(confirmationMessage)) {
+        return;
+      }
+      
+      let savedCount = 0;
+      let updatedCount = 0;
+      let zeroQtySaved = 0;
+      
       selectedItems.forEach(item => {
         const { barcode, nama, qty, lokasi, user } = item;
         
-        if (barcode && barcode !== '-' && nama && nama !== 'N/A') {
-          const existingIndex = dataScan.findIndex(scan => 
-            scan.barcode === barcode && 
-            scan.lokasi === lokasi && 
-            scan.user === user
-          );
-          
-          if (existingIndex > -1) {
-            dataScan[existingIndex].qty += qty;
-          } else {
-            dataScan.push({
-              user: user,
-              lokasi: lokasi,
-              barcode: barcode,
-              nama: nama,
-              qty: qty
-            });
-          }
-          count++;
+        // Cari apakah item sudah ada di dataScan
+        const existingIndex = dataScan.findIndex(scan => 
+          scan.barcode === barcode && 
+          scan.lokasi === lokasi && 
+          scan.user === user
+        );
+        
+        if (existingIndex > -1) {
+          // Update qty yang sudah ada
+          dataScan[existingIndex].qty = qty; // **PERBAIKAN: SET QTY, BUKAN TAMBAH**
+          updatedCount++;
+        } else {
+          // Tambah data baru
+          dataScan.push({
+            user: user,
+            lokasi: lokasi,
+            barcode: barcode,
+            nama: nama,
+            qty: qty, // **INI YANG DIPERBAIKI: SIMPAN JUGA YANG 0**
+            timestamp: new Date().toISOString()
+          });
+          savedCount++;
+        }
+        
+        if (qty === 0) {
+          zeroQtySaved++;
         }
       });
       
+      // Simpan ke localStorage
       saveDataToLocalStorage();
       updateTable();
       setFillingQtyStatus(false);
       document.getElementById('qtyModal').style.display = 'none';
       
-      alert(`✅ ${count} item berhasil ditambahkan ke data scan untuk lokasi ${locationName}.`);
+      // **PERBAIKAN: Tampilkan pesan yang jelas**
+      let successMessage = `✅ Data berhasil disimpan!\n\n`;
+      if (savedCount > 0) {
+        successMessage += `• ${savedCount} item baru ditambahkan\n`;
+      }
+      if (updatedCount > 0) {
+        successMessage += `• ${updatedCount} item diperbarui\n`;
+      }
+      if (zeroQtySaved > 0) {
+        successMessage += `• ${zeroQtySaved} item dengan qty = 0\n`;
+      }
+      successMessage += `\nTotal data scan sekarang: ${dataScan.length} item`;
+      
+      alert(successMessage);
     }
 
     // =============== FUNGSI UTILITY ===============
@@ -2292,7 +2380,7 @@
       }
     }
 
-    // =============== SETUP EVENT LISTENERS (DIPERBAIKI TANPA AUTO-TRIGGER) ===============
+    // =============== SETUP EVENT LISTENERS (DIPERBAIKI) ===============
     function setupEventListeners() {
       // Tabs
       document.querySelectorAll('.tab').forEach(tab => {
@@ -2334,8 +2422,7 @@
         lokasiInput.focus();
       });
       
-      // =============== PERBAIKAN PENTING: EVENT LISTENER BARCODE INPUT ===============
-      // Event listener untuk keyboard shortcuts
+      // Barcode input events
       document.getElementById('barcodeInput')?.addEventListener('keydown', function(e) {
         const value = this.value.trim();
         const now = Date.now();
@@ -2384,7 +2471,6 @@
         }
       });
       
-      // Event listener untuk input - TANPA AUTO-TRIGGER
       document.getElementById('barcodeInput')?.addEventListener('input', function() {
         clearTimeout(barcodeTimeout);
         
@@ -2401,30 +2487,22 @@
         // Update indikator mode
         updateInputModeIndicator(value);
         
-        // =============== SOLUSI TANPA AUTO-TRIGGER ===============
-        // HANYA trigger otomatis untuk barcode SANGAT PANJANG (15+ karakter)
-        // Ini untuk scanner yang menghasilkan barcode sangat panjang
-        if (value.length >= 18) { // Hanya untuk barcode sangat panjang
+        // Auto-trigger hanya untuk barcode sangat panjang
+        if (value.length >= 18) {
           barcodeTimeout = setTimeout(() => {
-            // Double check: apakah value masih sama?
             const currentValue = document.getElementById('barcodeInput').value.trim();
             if (currentValue === value && currentValue.length >= 18) {
               console.log('Auto-trigger untuk barcode panjang:', currentValue.length, 'karakter');
               handleBarcodeInput();
             }
-          }, 300); // Delay 300ms untuk memastikan input selesai
+          }, 300);
         }
-        // Untuk barcode 12-17 digit, user harus tekan Enter
-        // Tidak ada auto-trigger untuk menghindari gangguan
       });
       
-      // Event listener untuk paste (scanner sering menggunakan paste)
       document.getElementById('barcodeInput')?.addEventListener('paste', function(e) {
         const pastedText = (e.clipboardData || window.clipboardData).getData('text');
         
-        // Jika paste text panjang, kemungkinan dari scanner
         if (pastedText.length >= 12) {
-          // Tunggu sebentar untuk memastikan value sudah terpaste
           setTimeout(() => {
             const currentValue = document.getElementById('barcodeInput').value.trim();
             if (currentValue.length >= 12) {
@@ -2435,7 +2513,7 @@
         }
       });
       
-      // Tombol manual search
+      // Manual search button
       document.getElementById('manualSearchBtn')?.addEventListener('click', function() {
         const barcodeInput = document.getElementById("barcodeInput");
         const barcode = barcodeInput.value.trim();
@@ -2446,14 +2524,12 @@
           return;
         }
         
-        // Cek apakah barang sudah ditemukan
         const namaBarangInput = document.getElementById("namaBarangInput");
         if (namaBarangInput.value && namaBarangInput.value !== "❌ Tidak ditemukan") {
           alert("Barang sudah ditemukan!");
           return;
         }
         
-        // Tampilkan form barang baru
         showNewItemForm(barcode);
       });
       
@@ -2540,7 +2616,7 @@
       
       document.getElementById('cancelNewItemBtn2')?.addEventListener('click', hideNewItemForm);
       
-      // Tombol utama
+      // Main buttons
       document.getElementById('scannerButton')?.addEventListener('click', toggleScanner);
       document.getElementById('tambahDataBtn')?.addEventListener('click', tambahData);
       document.getElementById('exportDataBtn')?.addEventListener('click', exportToExcel);
@@ -2555,11 +2631,26 @@
         document.getElementById('supabaseModal').style.display = 'none';
       });
       
-      document.getElementById('loadLocationDataBtn')?.addEventListener('click', loadSelectedLocationData);
+      // **PERBAIKAN: Tambahkan event listener untuk load selected location data**
+      document.getElementById('loadLocationDataBtn')?.addEventListener('click', function() {
+        const loadBtn = document.getElementById('loadLocationDataBtn');
+        if (!loadBtn || !loadBtn.dataset.location) {
+          alert('Pilih lokasi terlebih dahulu.');
+          return;
+        }
+        
+        const location = loadBtn.dataset.location;
+        const items = JSON.parse(loadBtn.dataset.items);
+        
+        document.getElementById('locationModal').style.display = 'none';
+        showQtyModal(location, items);
+      });
+      
       document.getElementById('closeLocationModalBtn')?.addEventListener('click', () => {
         document.getElementById('locationModal').style.display = 'none';
       });
       
+      // **PERBAIKAN: Event listener untuk modal Qty**
       document.getElementById('closeQtyModalBtn')?.addEventListener('click', () => {
         setFillingQtyStatus(false);
         document.getElementById('qtyModal').style.display = 'none';
@@ -2576,7 +2667,19 @@
       document.getElementById('selectAllCheckbox')?.addEventListener('change', selectAllItems);
       document.getElementById('saveQtyBtn')?.addEventListener('click', saveQtyToDataScan);
       
-      // Keyboard shortcuts untuk Qty input
+      // **PERBAIKAN: Event listener untuk auto-update checkbox ketika qty diisi**
+      document.addEventListener('input', function(e) {
+        if (e.target.classList.contains('item-qty')) {
+          const checkbox = e.target.closest('tr').querySelector('.item-checkbox');
+          if (checkbox && !checkbox.checked) {
+            checkbox.checked = true;
+            updateSelectedCount();
+          }
+          updateSelectedCount();
+        }
+      });
+      
+      // Keyboard shortcuts
       document.getElementById('qtyInput')?.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
           e.preventDefault();
@@ -2591,7 +2694,7 @@
         }
       });
       
-      // Global events
+      // Global click to close modal
       window.addEventListener('click', function(e) {
         if (e.target.classList.contains('modal')) {
           if (e.target.id === 'qtyModal') {
@@ -2600,21 +2703,6 @@
           e.target.style.display = 'none';
         }
       });
-    }
-
-    // =============== FUNGSI TAMBAHAN UNTUK MODAL LOKASI ===============
-    function loadSelectedLocationData() {
-      const loadBtn = document.getElementById('loadLocationDataBtn');
-      if (!loadBtn || !loadBtn.dataset.location) {
-        alert('Pilih lokasi terlebih dahulu.');
-        return;
-      }
-      
-      const location = loadBtn.dataset.location;
-      const items = JSON.parse(loadBtn.dataset.items);
-      
-      document.getElementById('locationModal').style.display = 'none';
-      showQtyModal(location, items);
     }
 
     // =============== START APPLICATION ===============
