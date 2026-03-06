@@ -127,7 +127,7 @@
     .modal-content.long {
       max-height: 80vh;
       overflow-y: auto;
-      max-width: 600px;
+      max-width: 800px;
     }
     
     /* STYLE KHUSUS UNTUK TABEL MUAT DATA */
@@ -351,6 +351,24 @@
       background: #f5f5f5;
       color: #666;
       border-left: 3px solid #9e9e9e;
+    }
+    
+    /* Perbaikan: Kolom Nama Barang lebih lebar */
+    .location-items-table th:nth-child(3),
+    .location-items-table td:nth-child(3) {
+      max-width: 350px;
+      min-width: 200px;
+      white-space: normal;
+      word-wrap: break-word;
+    }
+    
+    /* Tabel utama juga diperlebar kolom namanya */
+    #dataTable th:nth-child(4),
+    #dataTable td:nth-child(4) {
+      max-width: 350px;
+      min-width: 200px;
+      white-space: normal;
+      word-wrap: break-word;
     }
     
     @media (max-width: 768px) {
@@ -1838,7 +1856,7 @@
       modal.style.display = 'block';
     }
 
-    // =============== FUNGSI UTAMA YANG DIPERBAIKI - SEMUA DATA QTY MASUK ===============
+    // =============== FUNGSI UTAMA YANG DIPERBAIKI - QTY 0 TIDAK DISIMPAN ===============
     function updateSelectedCount() {
       const checkboxes = document.querySelectorAll('.item-checkbox:checked');
       const countDiv = document.getElementById('selectedCount');
@@ -1866,7 +1884,7 @@
             message += ` | ${qtyPositiveCount} item dengan qty > 0 (total: ${totalQty})`;
           }
           if (qtyZeroCount > 0) {
-            message += ` | ${qtyZeroCount} item dengan qty = 0`;
+            message += ` | ${qtyZeroCount} item dengan qty = 0 <span style="color: #f44336;">(tidak akan disimpan)</span>`;
           }
           
           countDiv.innerHTML = message;
@@ -1902,7 +1920,7 @@
       updateSelectedCount();
     }
 
-    // =============== FUNGSI CRITICAL FIX - SIMPAN SEMUA DATA TERPILIH ===============
+    // =============== FUNGSI CRITICAL FIX - HANYA SIMPAN QTY > 0 ===============
     function saveQtyToDataScan() {
       const locationName = document.getElementById('modalLocationName').textContent;
       const user = document.getElementById("userInput").value || "Unknown";
@@ -1912,14 +1930,22 @@
       let totalItems = 0;
       let itemsWithZeroQty = 0;
       let itemsWithPositiveQty = 0;
+      let skippedItems = 0;
       
       rows.forEach((row, index) => {
         const checkbox = row.querySelector('.item-checkbox');
         const qtyInput = row.querySelector('.item-qty');
         
-        // **PERBAIKAN PENTING: SELALU MASUKKAN DATA JIKA CHECKBOX TERPILIH**
+        // **PERBAIKAN PENTING: HANYA PROSES JIKA CHECKBOX TERPILIH**
         if (checkbox && checkbox.checked) {
-          const qty = parseInt(qtyInput.value) || 0; // Terima qty 0 juga
+          const qty = parseInt(qtyInput.value) || 0;
+          
+          // **PERBAIKAN: SKIP QTY 0 - TIDAK DISIMPAN**
+          if (qty === 0) {
+            itemsWithZeroQty++;
+            skippedItems++;
+            return; // Lewati item dengan qty 0
+          }
           
           const cells = row.querySelectorAll('td');
           
@@ -1938,33 +1964,31 @@
             selectedItems.push({
               barcode: barcode,
               nama: namaText,
-              qty: qty, // **INI YANG DIPERBAIKI: SIMPAN JUGA QTY 0**
+              qty: qty, // QTY > 0 PASTI
               lokasi: locationName,
               user: user
             });
             
             totalItems++;
-            if (qty === 0) {
-              itemsWithZeroQty++;
-            } else {
-              itemsWithPositiveQty++;
-            }
+            itemsWithPositiveQty++;
           }
         }
       });
       
       if (totalItems === 0) {
-        alert('Tidak ada item yang dipilih. Pilih minimal satu item.');
+        let message = 'Tidak ada item dengan qty > 0 yang dipilih.';
+        if (itemsWithZeroQty > 0) {
+          message += `\n\n${itemsWithZeroQty} item dengan qty = 0 diabaikan (tidak disimpan).`;
+        }
+        alert(message);
         return;
       }
       
       // **PERBAIKAN: Konfirmasi sebelum menyimpan**
       let confirmationMessage = `Simpan ${totalItems} item ke data scan?\n\n`;
-      if (itemsWithPositiveQty > 0) {
-        confirmationMessage += `• ${itemsWithPositiveQty} item dengan qty > 0\n`;
-      }
+      confirmationMessage += `• ${itemsWithPositiveQty} item dengan qty > 0 (total: ${selectedItems.reduce((sum, item) => sum + item.qty, 0)})\n`;
       if (itemsWithZeroQty > 0) {
-        confirmationMessage += `• ${itemsWithZeroQty} item dengan qty = 0\n`;
+        confirmationMessage += `• ${itemsWithZeroQty} item dengan qty = 0 (diabaikan - tidak disimpan)\n`;
       }
       confirmationMessage += `\nLokasi: ${locationName}`;
       
@@ -1974,7 +1998,6 @@
       
       let savedCount = 0;
       let updatedCount = 0;
-      let zeroQtySaved = 0;
       
       selectedItems.forEach(item => {
         const { barcode, nama, qty, lokasi, user } = item;
@@ -1987,8 +2010,8 @@
         );
         
         if (existingIndex > -1) {
-          // Update qty yang sudah ada
-          dataScan[existingIndex].qty = qty; // **PERBAIKAN: SET QTY, BUKAN TAMBAH**
+          // **PERBAIKAN PENTING: AKUMULASI QTY, BUKAN MENIMPA!**
+          dataScan[existingIndex].qty += qty; // Menambahkan qty baru ke qty yang sudah ada
           updatedCount++;
         } else {
           // Tambah data baru
@@ -1997,14 +2020,10 @@
             lokasi: lokasi,
             barcode: barcode,
             nama: nama,
-            qty: qty, // **INI YANG DIPERBAIKI: SIMPAN JUGA YANG 0**
+            qty: qty, // QTY > 0 PASTI
             timestamp: new Date().toISOString()
           });
           savedCount++;
-        }
-        
-        if (qty === 0) {
-          zeroQtySaved++;
         }
       });
       
@@ -2020,10 +2039,10 @@
         successMessage += `• ${savedCount} item baru ditambahkan\n`;
       }
       if (updatedCount > 0) {
-        successMessage += `• ${updatedCount} item diperbarui\n`;
+        successMessage += `• ${updatedCount} item diakumulasi (qty ditambahkan ke data yang sudah ada)\n`;
       }
-      if (zeroQtySaved > 0) {
-        successMessage += `• ${zeroQtySaved} item dengan qty = 0\n`;
+      if (skippedItems > 0) {
+        successMessage += `• ${skippedItems} item dengan qty = 0 diabaikan (tidak disimpan)\n`;
       }
       successMessage += `\nTotal data scan sekarang: ${dataScan.length} item`;
       
@@ -2074,7 +2093,15 @@
         editBtn.onclick = () => {
           const newQty = prompt("Masukkan Qty baru:", item.qty);
           if (newQty !== null && !isNaN(newQty)) {
-            item.qty = parseInt(newQty);
+            const qtyBaru = parseInt(newQty);
+            if (qtyBaru > 0) {
+              item.qty = qtyBaru;
+            } else {
+              // Jika qty baru 0, hapus item dari dataScan
+              if (confirm("Qty 0 akan menghapus item ini. Lanjutkan?")) {
+                dataScan.splice(index, 1);
+              }
+            }
             saveDataToLocalStorage();
             updateTable();
           }
@@ -2670,11 +2697,14 @@
       // **PERBAIKAN: Event listener untuk auto-update checkbox ketika qty diisi**
       document.addEventListener('input', function(e) {
         if (e.target.classList.contains('item-qty')) {
+          const qty = parseInt(e.target.value) || 0;
           const checkbox = e.target.closest('tr').querySelector('.item-checkbox');
-          if (checkbox && !checkbox.checked) {
+          
+          // Auto-check jika qty > 0
+          if (qty > 0 && checkbox && !checkbox.checked) {
             checkbox.checked = true;
-            updateSelectedCount();
           }
+          
           updateSelectedCount();
         }
       });
